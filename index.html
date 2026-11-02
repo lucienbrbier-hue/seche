@@ -1016,15 +1016,15 @@ $('#importInput').onchange = async e => {
 
 /* ================= Muscu : bibliothèque ================= */
 const MUSCLES = {
-  pecs: 'Pectoraux', ep_av: 'Épaules avant', ep_lat: 'Épaules côté', ep_arr: 'Épaules arrière',
+  pecs_h: 'Pecs (haut)', pecs: 'Pecs (milieu/bas)', ep_av: 'Épaules avant', ep_lat: 'Épaules côté', ep_arr: 'Épaules arrière',
   biceps: 'Biceps', triceps: 'Triceps', avbras: 'Avant-bras',
   dorsaux: 'Dorsaux', trapezes: 'Trapèzes / haut du dos', lombaires: 'Lombaires', abdos: 'Abdos',
   quadris: 'Quadriceps', ischios: 'Ischios', fessiers: 'Fessiers', mollets: 'Mollets'
 };
-const GROUPS = { Pecs: ['pecs'], Dos: ['dorsaux', 'trapezes', 'lombaires'], 'Épaules': ['ep_av', 'ep_lat', 'ep_arr'], Bras: ['biceps', 'triceps', 'avbras'], Jambes: ['quadris', 'ischios', 'fessiers', 'mollets'], Abdos: ['abdos'] };
+const GROUPS = { Pecs: ['pecs_h', 'pecs'], Dos: ['dorsaux', 'trapezes', 'lombaires'], 'Épaules': ['ep_av', 'ep_lat', 'ep_arr'], Bras: ['biceps', 'triceps', 'avbras'], Jambes: ['quadris', 'ischios', 'fessiers', 'mollets'], Abdos: ['abdos'] };
 // grandes familles de séance (= tes boutons Dos / Pecs / Jambes)
 const SPLITS = {
-  Pecs: { l: 'Pecs · épaules · triceps', m: ['pecs', 'ep_av', 'ep_lat', 'triceps'] },
+  Pecs: { l: 'Pecs · épaules · triceps', m: ['pecs_h', 'pecs', 'ep_av', 'ep_lat', 'triceps'] },
   Dos: { l: 'Dos · biceps · arrière d\'épaule', m: ['dorsaux', 'trapezes', 'ep_arr', 'biceps'] },
   Jambes: { l: 'Jambes · abdos', m: ['quadris', 'ischios', 'fessiers', 'mollets', 'abdos'] }
 };
@@ -1086,7 +1086,7 @@ const EXLIB = [
   { n: 'Roulette abdos', g: 'Abdos', t: 'pdc', m: { abdos: 1, dorsaux: .3 } },
   { n: 'Russian twist', g: 'Abdos', t: 'pdc', m: { abdos: 1 } }
 ];
-const GROUP_DEFAULT_M = { Pecs: { pecs: 1, triceps: .4 }, Dos: { dorsaux: 1, trapezes: .5, biceps: .3 }, 'Épaules': { ep_av: .7, ep_lat: .7 }, Bras: { biceps: .6, triceps: .6 }, Jambes: { quadris: .8, fessiers: .6, ischios: .5 }, Abdos: { abdos: 1 } };
+const GROUP_DEFAULT_M = { Pecs: { pecs: 1, pecs_h: .5, triceps: .4 }, Dos: { dorsaux: 1, trapezes: .5, biceps: .3 }, 'Épaules': { ep_av: .7, ep_lat: .7 }, Bras: { biceps: .6, triceps: .6 }, Jambes: { quadris: .8, fessiers: .6, ischios: .5 }, Abdos: { abdos: 1 } };
 function allEx() { return EXLIB.concat(st().customEx || []); }
 function exInfo(n) { return allEx().find(e => e.n === n) || { n, g: 'Autre', m: {}, t: 'charge' }; }
 const exT = e => e.t || 'charge';
@@ -1106,13 +1106,13 @@ function lastPerf(key, before) { const h = exHistory(key).filter(r => r.d < befo
 // séries « effectives » par muscle sur une période
 function muscleSets(from, to = today()) {
   const out = {}; Object.keys(MUSCLES).forEach(k => out[k] = 0);
-  workoutDays(from).filter(d => d <= to).forEach(d => S.days[d].workout.ex.forEach(x => { const e = exInfo(x.n), n = (x.sets || []).filter(s => s.r).length; Object.entries(e.m || {}).forEach(([m, w]) => { if (out[m] != null) out[m] += n * w; }); }));
+  workoutDays(from).filter(d => d <= to).forEach(d => S.days[d].workout.ex.forEach(x => { const n = (x.sets || []).filter(s => s.r).length; Object.entries(exMuscles(x)).forEach(([m, w]) => { if (out[m] != null) out[m] += n * w; }); }));
   return out;
 }
-function lastTrained(m) { const ds = workoutDays().reverse(); for (const d of ds) { if (S.days[d].workout.ex.some(x => (exInfo(x.n).m || {})[m] >= .5 && (x.sets || []).length)) return d; } return null; }
+function lastTrained(m) { const ds = workoutDays().reverse(); for (const d of ds) { if (S.days[d].workout.ex.some(x => (exMuscles(x)[m] || 0) >= .5 && (x.sets || []).length)) return d; } return null; }
 function autoSession(w) {
   const tally = { Pecs: 0, Dos: 0, Jambes: 0 }; let pdc = 0, tot = 0;
-  w.ex.forEach(x => { const e = exInfo(x.n), n = (x.sets || []).length; tot += n; if (exT(e) !== 'charge') pdc += n; Object.entries(SPLITS).forEach(([k, sp]) => { Object.entries(e.m || {}).forEach(([m, wt]) => { if (sp.m.includes(m)) tally[k] += n * wt; }); }); });
+  w.ex.forEach(x => { const e = exInfo(x.n), n = (x.sets || []).length; tot += n; if (exT(e) !== 'charge') pdc += n; Object.entries(SPLITS).forEach(([k, sp]) => { Object.entries(exMuscles(x)).forEach(([m, wt]) => { if (sp.m.includes(m)) tally[k] += n * wt; }); }); });
   if (!tot) return null;
   if (pdc / tot > .6) return 'Cali';
   const arr = Object.entries(tally).sort((a, b) => b[1] - a[1]);
@@ -1129,7 +1129,7 @@ function recommend() {
   }).sort((a, b) => b.score - a.score);
   const best = res[0];
   // exos suggérés : tes plus fréquents pour ces muscles, complétés par la bibliothèque
-  const freq = {}; workoutDays().forEach(d => S.days[d].workout.ex.forEach(x => { const e = exInfo(x.n); if (Object.keys(e.m || {}).some(m => best.sp.m.includes(m) && e.m[m] >= .8)) freq[exKey(x)] = (freq[exKey(x)] || 0) + 1; }));
+  const freq = {}; workoutDays().forEach(d => S.days[d].workout.ex.forEach(x => { const mm = exMuscles(x); if (Object.keys(mm).some(m => best.sp.m.includes(m) && mm[m] >= .8)) freq[exKey(x)] = (freq[exKey(x)] || 0) + 1; }));
   let sug = Object.entries(freq).sort((a, b) => b[1] - a[1]).map(x => x[0]);
   const weak = best.sp.m.slice().sort((a, b) => ms[a] - ms[b]);
   weak.forEach(m => { if (sug.length < 5) { const e = EXLIB.find(x => (x.m[m] || 0) >= 1 && !sug.some(s => s.startsWith(x.n))); if (e) sug.push(e.n); } });
@@ -1158,7 +1158,8 @@ function bodySvg(side, val, sel) {
     both('trapezes', 'M53 33 L42 38 L53 39 Z') +
     both('ep_lat', 'M33 41 Q25 45 25 57 Q29 52 34 50 Z') +
     both('ep_av', 'M35 39 Q43 37 45 43 Q41 52 34 54 Q29 47 35 39 Z') +
-    both('pecs', 'M59.5 40 L46 41 Q40 50 44 62 Q52 68 59.5 63 Z') +
+    both('pecs_h', 'M59.5 40 L46 41 Q42 46 42.5 51 L59.5 51 Z') +
+    both('pecs', 'M42.5 51.5 Q41 57 44 62 Q52 68 59.5 63 L59.5 51.5 Z') +
     both('biceps', 'M25 58 Q30 54 35 58 L35 82 Q30 86 25 82 Z') +
     both('avbras', 'M20 88 Q25 85 30 88 L29 118 Q25 121 21 118 Z') +
     m('abdos', 'M51 66 Q60 63 69 66 L68 108 Q60 112 52 108 Z') +
@@ -1199,7 +1200,7 @@ function openWorkout(date) {
       <button class="btn" id="wkAdd" style="margin-top:4px">+ Ajouter un exercice</button>
       ${w.ex.length ? `<button class="btn danger" id="wkClear" style="margin-top:10px">Effacer la séance</button>` : ''}`;
     $('#wkDone', ov).onclick = close;
-    $('#wkAdd', ov).onclick = () => pickExercise(n => { const e = exInfo(n), x = { n, v: e.v ? e.v[0] : null, sets: [] }; const lp = lastPerf(exKey(x), date); x.sets = lp ? [{ ...lp.x.sets[0] }] : [{ r: exT(e) === 'temps' ? 20 : 10, kg: exT(e) === 'charge' ? null : null }]; w.ex.push(x); save(w); draw(); setTimeout(() => ov.querySelector('.sheet').scrollTo({ top: 1e5, behavior: 'smooth' }), 50); });
+    $('#wkAdd', ov).onclick = () => pickExercise((n, v) => { const e = exInfo(n), x = { n, v: v ?? (e.v ? e.v[0] : null), sets: [] }; const lp = lastPerf(exKey(x), date); x.sets = lp ? [{ ...lp.x.sets[0] }] : [{ r: exT(e) === 'temps' ? 20 : 10, kg: exT(e) === 'charge' ? null : null }]; w.ex.push(x); save(w); draw(); setTimeout(() => ov.querySelector('.sheet').scrollTo({ top: 1e5, behavior: 'smooth' }), 50); });
     if ($('#wkClear', ov)) $('#wkClear', ov).onclick = () => { if (confirm('Effacer tous les exos de cette séance ?')) { save({ ex: [] }); draw(); } };
     $$('[data-copy-day]', ov).forEach(b => b.onclick = () => { const src = S.days[b.dataset.copyDay].workout; save({ ex: src.ex.map(x => ({ n: x.n, v: x.v, sets: x.sets.map(s => ({ ...s })) })) }); draw(); toast('Séance copiée — ajuste tes séries'); });
     $$('[data-x]', ov).forEach(el => {
@@ -1207,7 +1208,7 @@ function openWorkout(date) {
       $$('[data-set]', el).forEach(inp => inp.onchange = () => { const [j, k] = inp.dataset.set.split(':'); x.sets[+j][k] = num(inp.value); save(w); });
       $('[data-addset]', el).onclick = () => { const l = x.sets[x.sets.length - 1]; x.sets.push(l ? { ...l } : { r: 10, kg: null }); save(w); draw(); };
       $$('[data-delset]', el).forEach(b => b.onclick = () => { x.sets.splice(+b.dataset.delset, 1); save(w); draw(); });
-      $('[data-info]', el).onclick = () => exPreview(x.n);
+      $('[data-info]', el).onclick = () => exPreview(x.n, null, x.v);
       $('[data-delex]', el).onclick = () => { if (confirm(`Retirer ${x.n} ?`)) { w.ex.splice(i, 1); save(w); draw(); } };
       const vs = $('[data-var]', el); if (vs) vs.onchange = () => { x.v = vs.value || null; save(w); draw(); };
       $$('[data-mv]', el).forEach(b => b.onclick = () => { const j = i + +b.dataset.mv; if (j < 0 || j >= w.ex.length) return; [w.ex[i], w.ex[j]] = [w.ex[j], w.ex[i]]; save(w); draw(); });
@@ -1222,7 +1223,7 @@ function exCard(x, i, date) {
   const pr = rec && cur && cur.m > rec.best.m;
   const variants = e.v || [];
   return `<div class="card" data-x="${i}">
-    <div class="row between"><b style="font-size:17px">${esc(x.n)}</b><span class="row" style="gap:12px"><button class="link" data-info title="Voir le mouvement">ⓘ</button><button class="link" data-mv="-1">↑</button><button class="link" data-mv="1">↓</button><button class="del" data-delex style="width:auto">✕</button></span></div>
+    <div class="row between"><span class="row" style="gap:10px"><span class="thumb" data-info style="cursor:pointer">${figSvg(figKey(x.n, x.v))}</span><b style="font-size:17px">${esc(x.n)}</b></span><span class="row" style="gap:12px"><button class="link" data-mv="-1">↑</button><button class="link" data-mv="1">↓</button><button class="del" data-delex style="width:auto">✕</button></span></div>
     ${variants.length ? `<select class="tinput" data-var style="margin-top:8px;padding:8px 10px;font-size:15px"><option value="">—</option>${variants.map(v => `<option ${x.v === v ? 'selected' : ''}>${esc(v)}</option>`).join('')}</select>` : ''}
     <div class="small muted" style="margin:8px 0 4px">${lp ? `${dShort(lp.d)} : ${lp.x.sets.map(s => fmtSet(s, t)).join(' · ')}` : ''}${rec ? `<br>🏆 ${fmtSet(rec.best, t)}` : ''}${pr ? ' <span style="color:var(--green);font-weight:700">· record !</span>' : ''}</div>
     <div class="sets">${(x.sets || []).map((s, j) => `<div class="setrow"><span class="muted small">${j + 1}</span>
@@ -1244,9 +1245,9 @@ function pickExercise(cb) {
     const norm = s => s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
     let ex = allEx().filter(e => (g === 'Tous' || e.g === g) && (!q || norm(e.n).includes(norm(q))));
     ex.sort((a, b) => (used[b.n] || 0) - (used[a.n] || 0));
-    $('#exL', ov).innerHTML = `<div class="card" style="padding:4px 16px">${ex.map(e => `<div class="jrow" data-pick="${esc(e.n)}"><div class="thumb">${FIGMAP[e.n] ? figSvg(FIGMAP[e.n]) : ''}</div><div class="bd"><b>${esc(e.n)}</b><br><span class="small">${esc(e.g)} · ${Object.entries(e.m || {}).filter(x => x[1] >= .5).map(x => MUSCLES[x[0]]).join(', ')}${used[e.n] ? ` · ${used[e.n]}× ✓` : ''}</span></div><span class="chev">›</span></div>`).join('') || '<div class="muted small" style="padding:12px 0">Aucun exo trouvé.</div>'}</div>
+    $('#exL', ov).innerHTML = `<div class="card" style="padding:4px 16px">${ex.map(e => `<div class="jrow" data-pick="${esc(e.n)}"><div class="thumb">${figSvg(figKey(e.n, e.v && e.v[0]))}</div><div class="bd"><b>${esc(e.n)}</b><br><span class="small">${esc(e.g)} · ${Object.entries(e.m || {}).filter(x => x[1] >= .5).map(x => MUSCLES[x[0]]).join(', ')}${used[e.n] ? ` · ${used[e.n]}× ✓` : ''}</span></div><span class="chev">›</span></div>`).join('') || '<div class="muted small" style="padding:12px 0">Aucun exo trouvé.</div>'}</div>
       ${q ? `<button class="btn sec" id="exNew">+ Créer « ${esc($('#exQ', ov).value.trim())} »</button>` : ''}`;
-    $$('[data-pick]', ov).forEach(r => r.onclick = () => exPreview(r.dataset.pick, n => { ov.remove(); cb(n); }));
+    $$('[data-pick]', ov).forEach(r => r.onclick = () => exPreview(r.dataset.pick, (n, v) => { ov.remove(); cb(n, v); }));
     if ($('#exNew', ov)) $('#exNew', ov).onclick = () => newExercise($('#exQ', ov).value.trim(), g, n => { ov.remove(); cb(n); });
   };
   $('#exQ', ov).oninput = list;
@@ -1337,7 +1338,7 @@ function exDetail(key) {
     </div>
     <div class="card"><h3>${label} par séance</h3><div class="chart" id="cExd"></div></div>
     <div class="card">${h.slice().reverse().map(r => `<div class="jrow"><div class="dt">${dShort(r.d)}</div><div class="bd">${r.x.sets.map(s => fmtSet(s, t)).join(' · ')}</div></div>`).join('')}</div>
-    <div class="small muted" style="margin:0 4px">Muscles : ${Object.entries(e.m || {}).map(([m, w]) => `${MUSCLES[m]}${w < 1 ? ' (secondaire)' : ''}`).join(', ') || '–'}</div>`);
+    <div class="small muted" style="margin:0 4px">Muscles : ${Object.entries(exMuscles(h[0].x)).map(([m, w]) => `${MUSCLES[m]}${w < 1 ? ' (secondaire)' : ''}`).join(', ') || '–'}</div>`);
   chart($('#cExd', ov), { height: 160, minPad: 1, yFmt: v => fmt(v, 0), series: [{ data: h.map(r => [dn(r.d), r.best.m]), color: 'var(--pink)', area: true, dotsAll: true }], tipFmt: x => { const r = h.find(q => dn(q.d) === x); return r ? `${dShort(r.d)} · ${fmtSet(r.best, t)}` : ''; } });
 }
 
@@ -1437,8 +1438,8 @@ const CUE_EX = {
 };
 // animé en JS (requestAnimationFrame) : fonctionne partout, y compris Safari iOS
 function figSvg(key, anim = true) {
-  const f = FIGS[key]; if (!f) return '';
-  const side = f.a.s.length >= 5 && key !== 'lateral' && key !== 'lunge';
+  const f = getFig(key); if (!f) return '';
+  const side = f.a.s.length >= 5 && !/^(lateral|lunge|fly)/.test(key);
   const ln = (s, i, st, w, extra = '') => `<line data-i="${i}" x1="${s[0]}" y1="${s[1]}" x2="${s[2]}" y2="${s[3]}" stroke="${st}" stroke-width="${w}" stroke-linecap="round" ${extra}/>`;
   // de profil : bras/jambe « côté opposé » en retrait pour donner du volume
   const far = side ? f.a.s.slice(1, 5).map((s, k) => ln(s, k + 1, 'var(--sub2)', 4.5, 'transform="translate(-2.5,1)"')).join('') : '';
@@ -1458,7 +1459,7 @@ function figLoop() {
     const ph = (ts % 2800) / 2800, t = ph < .45 ? ease(ph / .45) : ph < .5 ? 1 : ph < .95 ? 1 - ease((ph - .5) / .45) : 0;
     const L = (a, b) => a + (b - a) * t;
     svgs.forEach(svg => {
-      const f = FIGS[svg.dataset.fig]; if (!f) return;
+      const f = getFig(svg.dataset.fig); if (!f) return;
       svg.querySelectorAll('line[data-i]').forEach(l => { const i = +l.dataset.i, a = f.a.s[i], b = f.b.s[i]; l.setAttribute('x1', L(a[0], b[0])); l.setAttribute('y1', L(a[1], b[1])); l.setAttribute('x2', L(a[2], b[2])); l.setAttribute('y2', L(a[3], b[3])); });
       const h = svg.querySelector('[data-h]'); h.setAttribute('cx', L(f.a.h[0], f.b.h[0])); h.setAttribute('cy', L(f.a.h[1], f.b.h[1]));
       svg.querySelectorAll('[data-l]').forEach(r => { const i = +r.dataset.l, a = f.a.s[i], b = f.b.s[i]; r.setAttribute('x', L(a[2], b[2]) - 5); r.setAttribute('y', L(a[3], b[3]) - 2.5); });
@@ -1467,21 +1468,89 @@ function figLoop() {
   };
   requestAnimationFrame(step);
 }
-function exPreview(n, onAdd) {
-  const e = exInfo(n), fk = FIGMAP[n], val = {}; Object.entries(e.m || {}).forEach(([m, w]) => val[m] = w >= 1 ? 18 : w >= .5 ? 4 : 2);
-  const prim = Object.entries(e.m || {}).filter(x => x[1] >= 1).map(x => MUSCLES[x[0]]), sec = Object.entries(e.m || {}).filter(x => x[1] < 1).map(x => MUSCLES[x[0]]);
+/* ================= Muscu : variantes (muscles + animation) ================= */
+// muscles travaillés selon la variante (remplace la carte par défaut de l'exo)
+const BENCH_VM = {
+  'Plat': { pecs: 1, pecs_h: .5, triceps: .5, ep_av: .4 },
+  'Incliné 15°': { pecs_h: 1, pecs: .8, triceps: .5, ep_av: .5 },
+  'Incliné 30°': { pecs_h: 1, pecs: .6, ep_av: .7, triceps: .5 },
+  'Incliné 45°': { ep_av: 1, pecs_h: .9, pecs: .4, triceps: .5 },
+  'Décliné': { pecs: 1, pecs_h: .2, triceps: .6, ep_av: .2 }
+};
+const noTri = vm => Object.fromEntries(Object.entries(vm).map(([k, m]) => [k, Object.fromEntries(Object.entries(m).filter(([x]) => x !== 'triceps'))]));
+const VM = {
+  'Développé couché barre': BENCH_VM, 'Développé haltères': BENCH_VM, 'Développé machine': BENCH_VM, 'Écarté haltères': noTri(BENCH_VM),
+  'Écarté poulie / pec deck': { 'Poulie haute': { pecs: 1, pecs_h: .3 }, 'Poulie milieu': { pecs: 1, pecs_h: .6 }, 'Poulie basse': { pecs_h: 1, pecs: .5, ep_av: .3 }, 'Pec deck': { pecs: 1, pecs_h: .6 } },
+  'Pompes': { 'Classiques': { pecs: 1, pecs_h: .5, triceps: .5, ep_av: .5 }, 'Déclinées': { pecs_h: 1, pecs: .7, ep_av: .7, triceps: .5 }, 'Larges': { pecs: 1, pecs_h: .5, ep_av: .4, triceps: .3 }, 'Diamant': { triceps: 1, pecs: .7, ep_av: .4 }, 'Archer': { pecs: 1, pecs_h: .5, triceps: .5, ep_av: .5 } },
+  'Tractions': { 'Pronation': { dorsaux: 1, biceps: .5, trapezes: .4, ep_arr: .3 }, 'Supination': { dorsaux: 1, biceps: .9, trapezes: .3 }, 'Neutre': { dorsaux: 1, biceps: .7, avbras: .4, trapezes: .3 }, 'Prise large': { dorsaux: 1, trapezes: .5, biceps: .3, ep_arr: .3 }, 'Prise serrée': { dorsaux: 1, biceps: .7, trapezes: .4 } },
+  'Tirage vertical': { 'Prise large': { dorsaux: 1, trapezes: .4, biceps: .4 }, 'Prise serrée': { dorsaux: 1, biceps: .7, trapezes: .3 }, 'Supination': { dorsaux: 1, biceps: .9 }, 'Neutre (triangle)': { dorsaux: 1, biceps: .6, trapezes: .3 } },
+  'Rowing barre': { 'Pronation': { trapezes: 1, dorsaux: .8, ep_arr: .6, biceps: .4, lombaires: .4 }, 'Supination': { dorsaux: 1, trapezes: .7, biceps: .7, lombaires: .4 } },
+  'Développé militaire': { 'Arnold': { ep_av: 1, ep_lat: .8, triceps: .5 } },
+  'Curl haltères': { 'Classique': { biceps: 1, avbras: .3 }, 'Incliné': { biceps: 1 }, 'Marteau': { biceps: .8, avbras: .8 }, 'Concentration': { biceps: 1 } },
+  'Squat': { 'Barre': { quadris: 1, fessiers: .8, ischios: .3, lombaires: .4 }, 'Goblet': { quadris: 1, fessiers: .7, abdos: .3 }, 'Smith': { quadris: 1, fessiers: .6 }, 'Front': { quadris: 1, fessiers: .6, abdos: .4 } },
+  'Fentes': { 'Marchées': { quadris: 1, fessiers: .8 }, 'Bulgares': { quadris: 1, fessiers: 1 }, 'Arrière': { fessiers: 1, quadris: .8 } },
+  'Relevés de jambes': { 'Suspendu': { abdos: 1, avbras: .3 }, 'Au sol': { abdos: 1 }, 'Chaise romaine': { abdos: 1 } }
+};
+// la base « pecs » des exos sans variante : on ajoute un peu de haut de pecs
+EXLIB.forEach(e => { if (e.m.pecs && e.m.pecs_h == null) e.m.pecs_h = +(e.m.pecs * .4).toFixed(1); });
+function exMuscles(x) { return (VM[x.n] && VM[x.n][x.v]) || exInfo(x.n).m || {}; }
+
+// animation selon la variante
+const BENCH_ANG = { 'Plat': 0, 'Incliné 15°': -15, 'Incliné 30°': -30, 'Incliné 45°': -45, 'Décliné': 14 };
+const rotP = ([x, y], [px, py], deg) => { const r = deg * Math.PI / 180, c = Math.cos(r), s = Math.sin(r); return [+(px + (x - px) * c - (y - py) * s).toFixed(1), +(py + (x - px) * s + (y - py) * c).toFixed(1)]; };
+function benchAngle(deg) {
+  const f = FIGS.bench, piv = [44, 66], R = p => rotP(p, piv, deg);
+  const tr = pose => ({ h: R(pose.h), s: pose.s.map((s, i) => i <= 2 ? [...R([s[0], s[1]]), ...R([s[2], s[3]])] : s) });
+  const back = rotP([86, 71], [44, 71], deg);
+  return { a: tr(f.a), b: tr(f.b), l: f.l, p: `<line x1="22" y1="71" x2="44" y2="71" stroke-width="4"/><line x1="44" y1="71" x2="${back[0]}" y2="${back[1]}" stroke-width="4"/><line x1="28" y1="73" x2="28" y2="95"/><line x1="44" y1="73" x2="44" y2="95"/>` };
+}
+const SEAT = '<rect x="50" y="62" width="22" height="4" rx="2"/><line x1="61" y1="66" x2="61" y2="95"/>';
+const seatLegs = pose => ({ h: pose.h, s: pose.s.map((s, i) => i === 3 ? [60, 60, 78, 61] : i === 4 ? [78, 61, 78, 94] : s) });
+Object.assign(FIGS, {
+  ohps: { a: seatLegs(FIGS.ohp.a), b: seatLegs(FIGS.ohp.b), p: SEAT, l: [2] },
+  legcurls: { a: FIGS.legext.b, b: sd([46, 18], [44, 28], [48, 44], [52, 58], [46, 58], [68, 58], [60, 78]), p: FIGS.legext.p, l: [4] },
+  calfs: { a: sd([52, 22], [50, 32], [62, 46], [70, 58], [50, 62], [70, 62], [70, 90], [[70, 90, 80, 94]]), b: sd([52, 22], [50, 32], [62, 42], [70, 54], [50, 62], [70, 57], [70, 85], [[70, 85, 80, 94]]), p: '<rect x="40" y="64" width="22" height="4" rx="2"/><line x1="51" y1="68" x2="51" y2="95"/><rect x="66" y="94" width="20" height="3"/>', l: [2] },
+  pushupd: { a: sd([91, 59], [82, 62], [82, 78], [82, 94], [52, 68], [34, 71], [18, 74]), b: sd([91, 80], [82, 82], [70, 84], [82, 94], [52, 79], [34, 77], [18, 74]), p: '<rect x="6" y="75" width="22" height="20" rx="2"/>' },
+  lungeb: { a: { h: [61, 14], s: [[60, 24, 60, 54], [60, 54, 66, 74], [66, 74, 64, 94], [60, 54, 50, 72], [50, 72, 32, 70], [60, 24, 60, 56]] }, b: { h: [61, 26], s: [[60, 36, 60, 66], [60, 66, 80, 68], [80, 68, 80, 94], [60, 66, 50, 86], [50, 86, 32, 70], [60, 36, 60, 66]] }, p: '<rect x="16" y="70" width="22" height="4" rx="2"/><line x1="27" y1="74" x2="27" y2="95"/>', l: [5] },
+  squatf: { a: sd([61, 14], [60, 24], [67, 34], [68, 26], [60, 52], [62, 72], [60, 94]), b: sd([64, 32], [60, 42], [69, 52], [70, 44], [46, 66], [66, 68], [60, 94]), l: [2] },
+  flyh: { a: { h: [60, 15], s: [[60, 23, 60, 58], [52, 28, 68, 28], [52, 28, 26, 14], [68, 28, 94, 14], [60, 58, 53, 94], [60, 58, 67, 94]] }, b: { h: [60, 15], s: [[60, 23, 60, 58], [52, 28, 68, 28], [52, 28, 57, 54], [68, 28, 63, 54], [60, 58, 53, 94], [60, 58, 67, 94]] }, l: [2, 3] },
+  flym: { a: { h: [60, 15], s: [[60, 23, 60, 58], [52, 28, 68, 28], [52, 28, 25, 30], [68, 28, 95, 30], [60, 58, 53, 94], [60, 58, 67, 94]] }, b: { h: [60, 15], s: [[60, 23, 60, 58], [52, 28, 68, 28], [52, 28, 57, 40], [68, 28, 63, 40], [60, 58, 53, 94], [60, 58, 67, 94]] }, l: [2, 3] },
+  flyb: { a: { h: [60, 15], s: [[60, 23, 60, 58], [52, 28, 68, 28], [52, 28, 28, 52], [68, 28, 92, 52], [60, 58, 53, 94], [60, 58, 67, 94]] }, b: { h: [60, 15], s: [[60, 23, 60, 58], [52, 28, 68, 28], [52, 28, 57, 24], [68, 28, 63, 24], [60, 58, 53, 94], [60, 58, 67, 94]] }, l: [2, 3] }
+});
+const FIGVAR = {
+  ohp: { 'Haltères assis': 'ohps', 'Machine': 'ohps', 'Arnold': 'ohps' },
+  legcurl: { 'Assis': 'legcurls' }, calf: { 'Assis': 'calfs' }, pushup: { 'Déclinées': 'pushupd' },
+  lunge: { 'Bulgares': 'lungeb' }, squat: { 'Goblet': 'squatf', 'Front': 'squatf' }
+};
+function figKey(n, v) {
+  if (n === 'Écarté poulie / pec deck') return { 'Poulie haute': 'flyh', 'Poulie basse': 'flyb' }[v] || 'flym';
+  const b = FIGMAP[n]; if (!b) return null;
+  if (b === 'bench' && BENCH_ANG[v]) return 'bench@' + BENCH_ANG[v];
+  return (FIGVAR[b] && FIGVAR[b][v]) || b;
+}
+function getFig(k) { if (!k) return null; if (FIGS[k]) return FIGS[k]; const m = /^bench@(-?\d+)$/.exec(k); return m ? (FIGS[k] = benchAngle(+m[1])) : null; }
+
+function exPreview(n, onAdd, v0) {
+  const e = exInfo(n); let v = v0 ?? (e.v ? e.v[0] : null);
   const h = Object.keys(exHistoryAll(n)).length;
-  const ov = sheet(`<div class="hd"><button class="link" data-close>${onAdd ? 'Retour' : 'Fermer'}</button><b>${esc(n)}</b>${onAdd ? '<button class="link" id="pvAdd" style="font-weight:700">Ajouter</button>' : '<span style="width:52px"></span>'}</div>
-    ${fk ? `<div class="card figcard">${figSvg(fk)}</div>` : ''}
-    <div class="card"><div class="small"><b>Muscles principaux :</b> ${prim.join(', ') || '–'}${sec.length ? `<br><span class="muted"><b>Secondaires :</b> ${sec.join(', ')}</span>` : ''}</div>
-      ${e.v ? `<div class="small muted" style="margin-top:8px">Variantes : ${e.v.map(esc).join(' · ')}</div>` : ''}
-      ${exT(e) !== 'charge' ? `<div class="small muted" style="margin-top:8px">${exT(e) === 'temps' ? 'Se note en secondes.' : 'Poids du corps — le champ kg sert au lest.'}</div>` : ''}
-      ${h ? `<div class="small muted" style="margin-top:8px">Déjà fait ${h} fois ✓</div>` : ''}
-      ${CUE_EX[n] || CUES[fk] ? `<details class="cue"><summary>Conseils d'exécution</summary><p>${esc(CUE_EX[n] || CUES[fk])}</p></details>` : ''}</div>
-    <div class="card"><div class="bodies" style="max-width:240px">${bodySvg('front', val)}${bodySvg('back', val)}</div></div>
-    ${onAdd ? '<button class="btn" id="pvAdd2">Ajouter à la séance</button>' : ''}`);
-  if (onAdd) { const go2 = () => { ov.remove(); onAdd(n); }; $('#pvAdd', ov).onclick = go2; $('#pvAdd2', ov).onclick = go2; }
-  $$('[data-m]', ov).forEach(p => p.style.cursor = 'default');
+  const ov = sheet(`<div class="hd"><button class="link" data-close>${onAdd ? 'Retour' : 'Fermer'}</button><b>${esc(n)}</b>${onAdd ? '<button class="link" id="pvAdd" style="font-weight:700">Ajouter</button>' : '<span style="width:52px"></span>'}</div><div id="pvBody"></div>
+    ${onAdd ? '<button class="btn" id="pvAdd2">Ajouter</button>' : ''}`);
+  const draw = () => {
+    const mm = exMuscles({ n, v }), val = {}; Object.entries(mm).forEach(([m, w]) => val[m] = w >= 1 ? 18 : w >= .7 ? 8 : w >= .4 ? 4 : 2);
+    const prim = Object.entries(mm).sort((a, b) => b[1] - a[1]).filter(x => x[1] >= .7).map(x => MUSCLES[x[0]]), sec = Object.entries(mm).filter(x => x[1] < .7).map(x => MUSCLES[x[0]]);
+    const fk = figKey(n, v), cue = CUE_EX[n] || CUES[FIGMAP[n]];
+    $('#pvBody', ov).innerHTML = `
+      ${e.v ? `<div class="chips" style="margin-bottom:12px">${e.v.map(x => `<button class="chip ${x === v ? 'on' : ''}" data-pv="${esc(x)}">${esc(x)}</button>`).join('')}</div>` : ''}
+      ${fk ? `<div class="card figcard">${figSvg(fk)}</div>` : ''}
+      <div class="card"><div class="bodies" style="max-width:240px">${bodySvg('front', val)}${bodySvg('back', val)}</div>
+        <div class="small" style="text-align:center;margin-top:8px"><b>${prim.join(', ') || '–'}</b>${sec.length ? `<span class="muted"> · ${sec.join(', ')}</span>` : ''}</div>
+        ${h ? `<div class="small muted" style="text-align:center;margin-top:4px">${h}× ✓</div>` : ''}
+        ${cue ? `<details class="cue"><summary>Conseils</summary><p>${esc(cue)}</p></details>` : ''}</div>`;
+    $$('[data-pv]', ov).forEach(b => b.onclick = () => { v = b.dataset.pv; draw(); });
+    $$('[data-m]', ov).forEach(p => p.style.cursor = 'default');
+  };
+  draw();
+  if (onAdd) { const go2 = () => { ov.remove(); onAdd(n, v); }; $('#pvAdd', ov).onclick = go2; $('#pvAdd2', ov).onclick = go2; }
 }
 function exHistoryAll(n) { const o = {}; workoutDays().forEach(d => { if (S.days[d].workout.ex.some(x => x.n === n)) o[d] = 1; }); return o; }
 
