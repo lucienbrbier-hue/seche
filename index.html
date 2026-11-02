@@ -187,7 +187,12 @@ textarea.tinput{resize:none;min-height:44px}
 .setrow .muted{font-size:13px}
 
 .fig{width:100%;height:auto;display:block;max-height:220px}
-.figcard{padding:10px 16px}
+.figcard{padding:10px 16px;background:linear-gradient(180deg,var(--card),color-mix(in srgb,var(--accent) 8%,var(--card)))}
+.figcard .fig{max-height:300px}
+details.cue{margin-top:10px;font-size:14px}
+details.cue summary{color:var(--accent);font-weight:500;cursor:pointer;list-style:none}
+details.cue summary::-webkit-details-marker{display:none}
+details.cue p{margin:6px 0 0;color:var(--sub)}
 .thumb{width:52px;height:48px;flex:none;background:var(--card2);border-radius:10px;padding:3px;display:grid;place-items:center}
 .thumb .fig{max-height:44px}
 
@@ -1373,7 +1378,7 @@ function pickExercise(cb) {
     const norm = s => s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
     let ex = allEx().filter(e => (g === 'Tous' || e.g === g) && (!q || norm(e.n).includes(norm(q))));
     ex.sort((a, b) => (used[b.n] || 0) - (used[a.n] || 0));
-    $('#exL', ov).innerHTML = `<div class="card" style="padding:4px 16px">${ex.map(e => `<div class="jrow" data-pick="${esc(e.n)}"><div class="thumb">${FIGMAP[e.n] ? figSvg(FIGMAP[e.n], false) : ''}</div><div class="bd"><b>${esc(e.n)}</b><br><span class="small">${esc(e.g)} · ${Object.entries(e.m || {}).filter(x => x[1] >= .5).map(x => MUSCLES[x[0]]).join(', ')}${used[e.n] ? ` · ${used[e.n]}× ✓` : ''}</span></div><span class="chev">›</span></div>`).join('') || '<div class="muted small" style="padding:12px 0">Aucun exo trouvé.</div>'}</div>
+    $('#exL', ov).innerHTML = `<div class="card" style="padding:4px 16px">${ex.map(e => `<div class="jrow" data-pick="${esc(e.n)}"><div class="thumb">${FIGMAP[e.n] ? figSvg(FIGMAP[e.n]) : ''}</div><div class="bd"><b>${esc(e.n)}</b><br><span class="small">${esc(e.g)} · ${Object.entries(e.m || {}).filter(x => x[1] >= .5).map(x => MUSCLES[x[0]]).join(', ')}${used[e.n] ? ` · ${used[e.n]}× ✓` : ''}</span></div><span class="chev">›</span></div>`).join('') || '<div class="muted small" style="padding:12px 0">Aucun exo trouvé.</div>'}</div>
       ${q ? `<button class="btn sec" id="exNew">+ Créer « ${esc($('#exQ', ov).value.trim())} »</button>` : ''}`;
     $$('[data-pick]', ov).forEach(r => r.onclick = () => exPreview(r.dataset.pick, n => { ov.remove(); cb(n); }));
     if ($('#exNew', ov)) $('#exNew', ov).onclick = () => newExercise($('#exQ', ov).value.trim(), g, n => { ov.remove(); cb(n); });
@@ -1566,16 +1571,37 @@ const CUE_EX = {
   'Pistol squat': 'Sur une jambe, l\'autre tendue devant, descends le plus bas possible en contrôle, puis remonte.',
   'Tractions': 'Suspendu à la barre, tire jusqu\'à passer le menton au-dessus, puis redescends jusqu\'à bras tendus. Pronation = paumes vers l\'avant, supination = vers toi.'
 };
+// animé en JS (requestAnimationFrame) : fonctionne partout, y compris Safari iOS
 function figSvg(key, anim = true) {
   const f = FIGS[key]; if (!f) return '';
-  const dur = '2.6s', ks = 'keyTimes="0;0.5;1" calcMode="spline" keySplines=".45 0 .55 1;.45 0 .55 1"';
-  const an = (attr, a, b) => anim && a !== b ? `<animate attributeName="${attr}" values="${a};${b};${a}" dur="${dur}" repeatCount="indefinite" ${ks}/>` : '';
-  const segs = f.a.s.map((s, i) => { const t = f.b.s[i], cable = (f.c || []).includes(i); return `<line x1="${s[0]}" y1="${s[1]}" x2="${s[2]}" y2="${s[3]}" stroke="${cable ? 'var(--sub)' : 'var(--text)'}" stroke-width="${cable ? 1.2 : 3.4}" stroke-linecap="round">${an('x1', s[0], t[0])}${an('y1', s[1], t[1])}${an('x2', s[2], t[2])}${an('y2', s[3], t[3])}</line>`; }).join('');
-  const head = `<circle cx="${f.a.h[0]}" cy="${f.a.h[1]}" r="6" fill="var(--text)">${an('cx', f.a.h[0], f.b.h[0])}${an('cy', f.a.h[1], f.b.h[1])}</circle>`;
-  const loads = (f.l || []).map(i => { const s = f.a.s[i], t = f.b.s[i]; return `<rect x="-5" y="-2.5" width="10" height="5" rx="2" fill="var(--accent)"><animateMotion dur="${dur}" repeatCount="indefinite" values="${s[2]},${s[3]};${t[2]},${t[3]};${s[2]},${s[3]}" ${ks}/></rect>`; }).join('');
-  // sans animation, animateMotion ne place pas la charge : position fixe
-  const loadsStatic = (f.l || []).map(i => { const s = f.a.s[i]; return `<rect x="${s[2] - 5}" y="${s[3] - 2.5}" width="10" height="5" rx="2" fill="var(--accent)"/>`; }).join('');
-  return `<svg viewBox="-4 -8 116 108" class="fig"><line x1="-4" y1="95.5" x2="112" y2="95.5" stroke="var(--sep)" stroke-width="1"/><g fill="none" stroke="var(--sub2)" stroke-width="2.4" stroke-linecap="round">${f.p || ''}</g>${segs}${head}${anim ? loads : loadsStatic}</svg>`;
+  const side = f.a.s.length >= 5 && key !== 'lateral' && key !== 'lunge';
+  const ln = (s, i, st, w, extra = '') => `<line data-i="${i}" x1="${s[0]}" y1="${s[1]}" x2="${s[2]}" y2="${s[3]}" stroke="${st}" stroke-width="${w}" stroke-linecap="round" ${extra}/>`;
+  // de profil : bras/jambe « côté opposé » en retrait pour donner du volume
+  const far = side ? f.a.s.slice(1, 5).map((s, k) => ln(s, k + 1, 'var(--sub2)', 4.5, 'transform="translate(-2.5,1)"')).join('') : '';
+  const segs = f.a.s.map((s, i) => { const cable = (f.c || []).includes(i); return ln(s, i, cable ? 'var(--sub)' : 'var(--text)', cable ? 1.2 : i === 0 && side ? 7 : 4.6); }).join('');
+  const head = `<circle data-h cx="${f.a.h[0]}" cy="${f.a.h[1]}" r="6.5" fill="var(--text)"/>`;
+  const loads = (f.l || []).map(i => { const s = f.a.s[i]; return `<rect data-l="${i}" x="${s[2] - 5}" y="${s[3] - 2.5}" width="10" height="5" rx="2" fill="var(--accent)"/>`; }).join('');
+  if (anim) requestAnimationFrame(figLoop);
+  return `<svg viewBox="-4 -8 116 108" class="fig" data-fig="${key}" ${anim ? 'data-anim' : ''}><line x1="-4" y1="95.5" x2="112" y2="95.5" stroke="var(--sep)" stroke-width="1"/><g fill="none" stroke="var(--sub2)" stroke-width="2.4" stroke-linecap="round">${f.p || ''}</g>${far}${segs}${head}${loads}</svg>`;
+}
+let figRunning = false;
+function figLoop() {
+  if (figRunning) return; figRunning = true;
+  const ease = x => x < .5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2;
+  const step = ts => {
+    const svgs = $$('svg.fig[data-anim]'); if (!svgs.length) { figRunning = false; return; }
+    // aller 45 %, pause, retour 45 %, pause
+    const ph = (ts % 2800) / 2800, t = ph < .45 ? ease(ph / .45) : ph < .5 ? 1 : ph < .95 ? 1 - ease((ph - .5) / .45) : 0;
+    const L = (a, b) => a + (b - a) * t;
+    svgs.forEach(svg => {
+      const f = FIGS[svg.dataset.fig]; if (!f) return;
+      svg.querySelectorAll('line[data-i]').forEach(l => { const i = +l.dataset.i, a = f.a.s[i], b = f.b.s[i]; l.setAttribute('x1', L(a[0], b[0])); l.setAttribute('y1', L(a[1], b[1])); l.setAttribute('x2', L(a[2], b[2])); l.setAttribute('y2', L(a[3], b[3])); });
+      const h = svg.querySelector('[data-h]'); h.setAttribute('cx', L(f.a.h[0], f.b.h[0])); h.setAttribute('cy', L(f.a.h[1], f.b.h[1]));
+      svg.querySelectorAll('[data-l]').forEach(r => { const i = +r.dataset.l, a = f.a.s[i], b = f.b.s[i]; r.setAttribute('x', L(a[2], b[2]) - 5); r.setAttribute('y', L(a[3], b[3]) - 2.5); });
+    });
+    requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
 }
 function exPreview(n, onAdd) {
   const e = exInfo(n), fk = FIGMAP[n], val = {}; Object.entries(e.m || {}).forEach(([m, w]) => val[m] = w >= 1 ? 18 : w >= .5 ? 4 : 2);
@@ -1583,11 +1609,11 @@ function exPreview(n, onAdd) {
   const h = Object.keys(exHistoryAll(n)).length;
   const ov = sheet(`<div class="hd"><button class="link" data-close>${onAdd ? 'Retour' : 'Fermer'}</button><b>${esc(n)}</b>${onAdd ? '<button class="link" id="pvAdd" style="font-weight:700">Ajouter</button>' : '<span style="width:52px"></span>'}</div>
     ${fk ? `<div class="card figcard">${figSvg(fk)}</div>` : ''}
-    <div class="card"><p style="margin:0 0 10px;font-size:15px">${esc(CUE_EX[n] || CUES[fk] || 'Exercice perso.')}</p>
-      <div class="small"><b>Muscles principaux :</b> ${prim.join(', ') || '–'}${sec.length ? `<br><span class="muted"><b>Secondaires :</b> ${sec.join(', ')}</span>` : ''}</div>
+    <div class="card"><div class="small"><b>Muscles principaux :</b> ${prim.join(', ') || '–'}${sec.length ? `<br><span class="muted"><b>Secondaires :</b> ${sec.join(', ')}</span>` : ''}</div>
       ${e.v ? `<div class="small muted" style="margin-top:8px">Variantes : ${e.v.map(esc).join(' · ')}</div>` : ''}
       ${exT(e) !== 'charge' ? `<div class="small muted" style="margin-top:8px">${exT(e) === 'temps' ? 'Se note en secondes.' : 'Poids du corps — le champ kg sert au lest.'}</div>` : ''}
-      ${h ? `<div class="small muted" style="margin-top:8px">Déjà fait ${h} fois ✓</div>` : ''}</div>
+      ${h ? `<div class="small muted" style="margin-top:8px">Déjà fait ${h} fois ✓</div>` : ''}
+      ${CUE_EX[n] || CUES[fk] ? `<details class="cue"><summary>Conseils d'exécution</summary><p>${esc(CUE_EX[n] || CUES[fk])}</p></details>` : ''}</div>
     <div class="card"><div class="bodies" style="max-width:240px">${bodySvg('front', val)}${bodySvg('back', val)}</div></div>
     ${onAdd ? '<button class="btn" id="pvAdd2">Ajouter à la séance</button>' : ''}`);
   if (onAdd) { const go2 = () => { ov.remove(); onAdd(n); }; $('#pvAdd', ov).onclick = go2; $('#pvAdd2', ov).onclick = go2; }
