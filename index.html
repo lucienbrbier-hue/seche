@@ -992,13 +992,34 @@ function renderGuide() {
 /* ================= Vue : Réglages ================= */
 function renderSettings() {
   const s = st(), v = $('#v-settings');
-  const shortcutBody = S.healthToken ? JSON.stringify({ p_token: S.healthToken, p_date: 'AAAA-MM-JJ', p_steps: 0 }) : '';
   v.innerHTML = `
   <div class="lt">Réglages</div>
   <div class="subt">${esc(S.user.email)}</div>
 
   <div class="ghd">Apparence</div>
   <div class="seg" id="themeSeg" style="margin:0 0 4px">${[['dark', 'Sombre'], ['light', 'Clair'], ['auto', 'Auto']].map(([k, l]) => `<button data-t="${k}" class="${s.theme === k ? 'on' : ''}">${l}</button>`).join('')}</div>
+
+  <div class="ghd">Raccourci iPhone · pas + sommeil automatiques</div>
+  <div class="card">
+    ${S.healthToken ? `
+    <p class="small" style="margin-top:0">Chaque soir à 23:30, ton iPhone envoie tout seul tes <b>pas du jour</b> et ta <b>nuit dernière</b> (app Santé). À faire une seule fois, ~5 min, dans l'app <b>Raccourcis</b>.</p>
+    <div class="muted small">Les 3 valeurs à copier-coller :</div>
+    ${[['URL', SB_URL + '/rest/v1/rpc/log_health'], ['apikey', SB_KEY], ['Jeton', S.healthToken]].map(([l, v]) => `<div class="row" style="margin:6px 0"><span class="small" style="width:52px;flex:none">${l}</span><code class="code" style="flex:1;padding:7px">${esc(v)}</code><button class="link small" data-copy="${esc(v)}">Copier</button></div>`).join('')}
+    <ol class="steps small">
+      <li><b>Automatisation</b> → <b>+</b> → <b>Heure de la journée</b> → <b>23:30</b>, <b>Quotidiennement</b> → coche <b>Exécuter immédiatement</b> → Suivant → <b>Nouveau raccourci vide</b>.</li>
+      <li><b>👟 Pas</b> — ajoute <b>Rechercher des échantillons de santé</b> : type <i>Nombre de pas</i>, filtre <i>Date de début</i> <i>est aujourd'hui</i>. Puis <b>Calculer les statistiques</b> → <i>Somme</i>. Puis <b>Arrondir le nombre</b>.</li>
+      <li><b>🌙 Coucher</b> — ajoute <b>Rechercher des échantillons de santé</b> : type <i>Sommeil</i>, filtre <i>Date de début</i> <i>est au cours des derniers 1 jours</i>, trier par <i>Date de début</i>, <i>Plus ancien d'abord</i>, limite <i>1</i>. Puis <b>Obtenir les détails des échantillons de santé</b> → <i>Date de début</i>. Puis <b>Formater la date</b> → <i>Personnalisé</i> : <code>HH:mm</code>.</li>
+      <li><b>☀️ Réveil</b> — pareil, mais trier par <i>Date de fin</i>, <i>Plus récent d'abord</i>, limite 1 → détail <i>Date de fin</i> → <b>Formater la date</b> <code>HH:mm</code>.</li>
+      <li><b>📅 Date</b> — ajoute <b>Date actuelle</b> puis <b>Formater la date</b> → <i>Personnalisé</i> : <code>yyyy-MM-dd</code>.</li>
+      <li><b>📤 Envoi</b> — ajoute <b>Obtenir le contenu de l'URL</b> : colle l'<b>URL</b>. Touche la flèche › : Méthode <b>POST</b>. En-têtes : <code>apikey</code> = la clé copiée, et <code>Content-Type</code> = <code>application/json</code>. Corps de la requête <b>JSON</b>, 5 champs :<br>
+        <code>p_token</code> Texte = ton jeton<br><code>p_date</code> Texte = la date formatée (étape 5)<br><code>p_steps</code> Nombre = le nombre arrondi (étape 2)<br><code>p_bed</code> Texte = la date formatée de l'étape 3<br><code>p_wake</code> Texte = la date formatée de l'étape 4</li>
+      <li>Appuie sur ▶︎ en bas pour tester : ça doit afficher <code>"ok"</code>, et tes pas apparaissent dans l'app.</li>
+    </ol>
+    <p class="small muted">😴 Pour le sommeil sans montre : app <b>Santé</b> → <b>Sommeil</b> → active un <b>horaire de sommeil</b> (coucher minuit, réveil 8h). L'iPhone note alors ton temps « au lit ». Si un jour rien n'est trouvé, l'app garde juste les pas.</p>
+    <button class="btn sec" id="testTok" style="margin-bottom:8px">Tester la connexion</button>
+    <button class="btn danger" id="newTok">Générer un nouveau jeton</button>`
+    : `<p class="small" style="margin-top:0">Ton iPhone peut envoyer tout seul tes pas et ton sommeil chaque soir (app Raccourcis, réglage une seule fois). Appuie sur Activer et suis le guide.</p><button class="btn" id="newTok">Activer</button>`}
+  </div>
 
   <div class="ghd">Profil</div>
   <div class="glist">
@@ -1042,22 +1063,6 @@ function renderSettings() {
     <div class="gitem"><span>Afficher les calories</span><label class="switch"><input type="checkbox" data-b="showKcal" ${s.showKcal ? 'checked' : ''}><span></span></label></div>
   </div>
 
-  <div class="ghd">Raccourci iPhone · pas automatiques</div>
-  <div class="card">
-    ${S.healthToken ? `
-    <p class="small" style="margin-top:0">Un raccourci iPhone peut envoyer tes pas (app Santé) chaque soir, tout seul. Dans l'app <b>Raccourcis</b> :</p>
-    <ol class="steps small">
-      <li>Onglet <b>Automatisation</b> → <b>+</b> → <b>Heure de la journée</b> → 23:30, tous les jours → <b>Exécuter immédiatement</b>.</li>
-      <li>Ajoute <b>Rechercher des échantillons de santé</b> : type <i>Nombre de pas</i>, date de début <i>aujourd'hui</i>. Puis <b>Calculer les statistiques</b> → <i>Somme</i>.</li>
-      <li>Ajoute <b>Date actuelle</b> puis <b>Formater la date</b> → format personnalisé <code>yyyy-MM-dd</code>.</li>
-      <li>Ajoute <b>Obtenir le contenu de l'URL</b> :<br>URL <code class="code">${SB_URL}/rest/v1/rpc/ingest_health</code><br>Méthode <b>POST</b> · En-têtes : <code>apikey</code> = <code class="code">${SB_KEY}</code> et <code>Content-Type</code> = <code>application/json</code><br>Corps <b>JSON</b> : <code>p_token</code> = ton jeton (texte), <code>p_date</code> = la date formatée, <code>p_steps</code> = la somme (nombre).</li>
-    </ol>
-    <div class="muted small">Ton jeton (garde-le pour toi) :</div>
-    <div class="row" style="margin:6px 0 10px"><code class="code" style="flex:1;padding:8px">${esc(S.healthToken)}</code><button class="link" id="copyTok">Copier</button></div>
-    <button class="btn sec" id="newTok">Générer un nouveau jeton</button>`
-    : `<p class="small" style="margin-top:0">Active-le pour que ton iPhone envoie tes pas automatiquement chaque soir (via l'app Raccourcis). Je te guide pas à pas.</p><button class="btn" id="newTok">Activer</button>`}
-  </div>
-
   <div class="ghd">Données</div>
   <div class="glist">
     <div class="gitem"><button class="link" id="exp">Exporter en JSON</button><span class="muted small">sauvegarde</span></div>
@@ -1085,7 +1090,8 @@ function bindSettings() {
   $('#addEx').onclick = () => { s.exercises.push({ n: 'Muscle-up', t: 'pdc' }); saveSettings(); renderSettings(); };
   $('#sessIn').onchange = e => { const a = e.target.value.split(',').map(x => x.trim()).filter(Boolean); if (a.length) { s.sessions = a; saveSettings(); toast('Enregistré ✓'); } };
   $('#newTok').onclick = async () => { if (S.healthToken && !confirm('L\'ancien jeton ne marchera plus. Continuer ?')) return; const a = new Uint8Array(24); crypto.getRandomValues(a); const t = [...a].map(x => x.toString(16).padStart(2, '0')).join(''); await flush(); const { error } = await sb.from('settings').upsert({ user_id: S.user.id, data: S.settings, health_token: t }); if (error) { toast('Erreur : ' + error.message); return; } S.healthToken = t; renderSettings(); toast('Jeton créé ✓'); };
-  if ($('#copyTok')) $('#copyTok').onclick = () => { navigator.clipboard.writeText(S.healthToken).then(() => toast('Copié ✓')); };
+  $$('[data-copy]').forEach(bt => bt.onclick = () => { navigator.clipboard.writeText(bt.dataset.copy).then(() => toast('Copié ✓'), () => toast('Copie impossible : sélectionne le texte')); });
+  if ($('#testTok')) $('#testTok').onclick = async () => { const { data, error } = await sb.rpc('log_health', { p_token: S.healthToken }); toast(error ? 'Erreur : ' + error.message : 'Connexion OK ✓'); };
   $('#exp').onclick = () => { const data = { app: 'seche', version: 1, exported: new Date().toISOString(), settings: S.settings, days: S.days, weekly: S.weekly, photos: S.photos.map(p => ({ date: p.date, path: p.path, note: p.note })) }; const b = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }); const a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = `seche-${today()}.json`; a.click(); toast('Export prêt ✓'); };
   $('#imp').onclick = () => $('#importInput').click();
   $('#logout').onclick = async () => { if (confirm('Se déconnecter ?')) { await sb.auth.signOut(); location.reload(); } };
