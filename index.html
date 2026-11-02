@@ -298,7 +298,7 @@ const DEFAULTS = {
   kcalMin: 2200, kcalMax: 2300, maint: 2550,
   protMin: 120, protMax: 135, rateMin: 0.25, rateMax: 0.5,
   bedStart: '02:00', bedGoal: '00:00', wakeGoal: '08:00', bedStepMin: 20, bedStepDays: 3,
-  theme: 'dark', showKcal: false, showSteps: true,
+  theme: 'dark', showKcal: false, showSteps: true, showRating: false, showProt: false,
   foods: [
     { n: 'Skyr', g: 15 }, { n: 'Jambon-beurre', g: 18 }, { n: 'Shaker', g: 25 },
     { n: '2 œufs', g: 12 }, { n: 'Thon', g: 25 }, { n: 'Viande/poisson', g: 30 }
@@ -535,13 +535,13 @@ function renderToday() {
     <div class="wmeta" id="wMeta">${weightMeta(d, lw, adj, off)}</div>
   </div>
 
-  <div class="card">
+  ${s.showRating ? `<div class="card">
     <h3>Ta journée côté bouffe</h3>
     <div class="choices">${[1, 2, 3].map(r => `<button class="choice ${d.rating === r ? 'on' : ''}" data-v="${r}"><span class="e">${RATING[r].e}</span>${RATING[r].l}</button>`).join('')}</div>
     <div class="small muted" style="margin-top:8px">🟢 dans les clous · 🟡 un peu au-dessus · 🔴 gros écart (resto, soirée…)</div>
-  </div>
+  </div>` : ''}
 
-  <div class="card">
+  ${s.showProt ? `<div class="card">
     <h3>Protéines <span class="r muted">objectif ${s.protMin}–${s.protMax} g</span></h3>
     <div class="prot">
       <div class="ring">${ring(prot, s.protMin, pc)}<div class="c"><b class="num">${prot}</b><span>/ ${s.protMin} g</span></div></div>
@@ -552,7 +552,7 @@ function renderToday() {
       </div>
     </div>
     <div class="chips">${s.foods.map((f, i) => `<button class="chip" data-f="${i}">${esc(f.n)}<b>+${f.g}</b></button>`).join('')}<button class="chip ghost" id="pFree">+ autre</button></div>
-  </div>
+  </div>` : `<div class="card"><div class="coach"><div class="ic" style="background:color-mix(in srgb,var(--green) 22%,transparent)">✋</div><div><b>Repère repas</b><p>À chaque repas : 1 paume de protéines, 1 poing de féculents (¾ le soir), 2 poings de légumes. Ta balance fera le reste.</p></div></div></div>`}
 
   <div class="card">
     <h3>Séance <span class="r muted">${sessionsThisWeek()} cette semaine</span></h3>
@@ -602,7 +602,7 @@ function bindToday() {
   $$('[data-w]').forEach(b => b.onclick = () => { let v = num(wIn.value); if (v == null) { const lw = rawWeights().filter(([x]) => x <= date).pop(); v = lw ? lw[1] : 68; } else v += .1 * +b.dataset.w; wIn.value = fmt(v); clearTimeout(timers.w); timers.w = setTimeout(() => wIn.onchange(), 900); });
   $$('.choice').forEach(b => b.onclick = () => { const r = +b.dataset.v; setDay(date, { rating: day(date).rating === r ? null : r }); renderToday(); });
   $$('[data-f]').forEach(b => b.onclick = () => { const f = st().foods[+b.dataset.f]; addProt(date, f.n, f.g); });
-  $('#pFree').onclick = () => { const g = num(prompt('Combien de grammes de protéines ?')); if (g) addProt(date, `${g} g`, Math.round(g)); };
+  if ($('#pFree')) $('#pFree').onclick = () => { const g = num(prompt('Combien de grammes de protéines ?')); if (g) addProt(date, `${g} g`, Math.round(g)); };
   if ($('#pUndo')) $('#pUndo').onclick = () => { const d = day(date), log = d.protein_log.slice(0, -1); setDay(date, { protein_log: log, protein: log.length ? log.reduce((s, x) => s + x.g, 0) : null }); renderToday(); };
   $$('[data-s]').forEach(b => b.onclick = () => { const x = b.dataset.s; setDay(date, { session: day(date).session === x ? null : x }); renderToday(); });
   if ($('#sNote')) { const n = $('#sNote'); n.oninput = () => { n.style.height = 'auto'; n.style.height = n.scrollHeight + 'px'; clearTimeout(timers.n); timers.n = setTimeout(() => setDay(date, { note: n.value.trim() || null }), 600); }; }
@@ -716,8 +716,7 @@ function renderStats() {
   <div class="sh">Tour de taille</div>
   <div class="card"><div class="chart" id="cWaist"></div></div>
 
-  <div class="sh">Protéines</div>
-  ${protCard()}
+  ${st().showProt ? `<div class="sh">Protéines</div>${protCard()}` : ''}
 
   <div class="sh">Sommeil</div>
   ${sleepCard()}
@@ -756,7 +755,7 @@ function renderStats() {
   ], extraY: [0], yFmt: v => sgn(v, 1), tipFmt: (x) => { const b = bfs.find(q => dn(q.d) === x); return b ? `${dShort(b.d)} · ${fmt(b.bf)} % · maigre ${fmt(b.lean)} kg` : ''; } });
   chart($('#cWaist'), { height: 150, empty: 'Mesure ton tour de taille au check-in hebdo', series: [{ data: waists.map(([d, y]) => [dn(d), y]), color: 'var(--purple)', area: true, dotsAll: true }] });
   const pd14 = []; for (let i = 13; i >= 0; i--) { const d = addDays(T, -i); pd14.push([dn(d), S.days[d]?.protein ?? 0]); }
-  chart($('#cProt'), { height: 140, xMin: dn(addDays(T, -13)) - .5, xMax: dn(T) + .5, yMin: 0, extraY: [s.protMax + 10], band: [s.protMin, s.protMax], yFmt: v => fmt(v, 0), series: [{ type: 'bar', data: pd14, color: y => y >= s.protMin ? 'var(--green)' : y > 0 ? 'var(--accent)' : 'var(--card2)' }], tipFmt: (x, y) => `${dShort(fromDn(x))} · ${y} g` });
+  if ($('#cProt')) chart($('#cProt'), { height: 140, xMin: dn(addDays(T, -13)) - .5, xMax: dn(T) + .5, yMin: 0, extraY: [s.protMax + 10], band: [s.protMin, s.protMax], yFmt: v => fmt(v, 0), series: [{ type: 'bar', data: pd14, color: y => y >= s.protMin ? 'var(--green)' : y > 0 ? 'var(--accent)' : 'var(--card2)' }], tipFmt: (x, y) => `${dShort(fromDn(x))} · ${y} g` });
   const sl = sortedDates(S.days).filter(d => inR(d) && S.days[d].bed).map(d => [dn(d), tMin(S.days[d].bed)]);
   const tg = []; { const a = Math.max(dn(s.startDate), xMin ?? dn(s.startDate)); for (let x = a; x <= xMax + 1; x++) tg.push([x, bedTarget(fromDn(x))]); }
   chart($('#cSleep'), { height: 170, xMin, xMax, minPad: 20, yFmt: v => minT(v), empty: 'Note ton coucher / réveil pour voir ta courbe', series: [
@@ -826,9 +825,9 @@ function heatmap() {
   const T = today(), weeks = 16; const t = pd(T); const end = addDays(T, 6 - ((t.getDay() + 6) % 7)); const start = addDays(end, -(weeks * 7) + 1);
   let h = '', n = 0, clean = 0;
   for (let i = 0; i < weeks * 7; i++) { const d = addDays(start, i), x = S.days[d]; const fut = d > T; if (x) { n++; if (x.rating === 1) clean++; } h += `<div class="${fut ? 'fut' : ''} ${x ? (x.rating ? 'r' + x.rating : 'r0') : ''} ${x?.session ? 's' : ''}" title="${d}"></div>`; }
-  return `<div class="row between" style="margin-bottom:10px"><div><div class="muted small">16 dernières semaines</div><b>${n} jours suivis · ${clean} 🟢</b></div><div class="small muted" style="text-align:right">Lun → Dim ↓</div></div>
+  return `<div class="row between" style="margin-bottom:10px"><div><div class="muted small">16 dernières semaines</div><b>${n} jours suivis${st().showRating ? ` · ${clean} 🟢` : ''}</b></div><div class="small muted" style="text-align:right">Lun → Dim ↓</div></div>
   <div class="heat" style="grid-template-columns:repeat(${weeks},1fr)">${h}</div>
-  <div class="legend"><span><i style="background:var(--green)"></i>Clean</span><span><i style="background:var(--yellow)"></i>Correct</span><span><i style="background:var(--red)"></i>Écart</span><span><i style="box-shadow:inset 0 0 0 2px var(--text)"></i>Séance</span></div>`;
+  <div class="legend">${st().showRating ? `<span><i style="background:var(--green)"></i>Clean</span><span><i style="background:var(--yellow)"></i>Correct</span><span><i style="background:var(--red)"></i>Écart</span>` : `<span><i style="background:color-mix(in srgb,var(--accent) 45%,var(--card2))"></i>Jour suivi</span>`}<span><i style="box-shadow:inset 0 0 0 2px var(--text)"></i>Séance</span></div>`;
 }
 function sessionsCard() {
   const s = st(), cnt = {}; s.sessions.forEach(x => cnt[x] = 0);
@@ -1044,9 +1043,9 @@ function renderSettings() {
     ${gnum('bedStepMin', 'Avancer de', 'min')}${gnum('bedStepDays', 'Tous les', 'jours')}
   </div>
 
-  <div class="ghd">Boutons protéines</div>
+  ${s.showProt ? `<div class="ghd">Boutons protéines</div>
   <div class="glist" id="foodList">${s.foods.map((f, i) => `<div class="gitem"><button class="del" data-delf="${i}">⊖</button><input class="wide" data-fn="${i}" value="${esc(f.n)}"><input data-fg="${i}" inputmode="numeric" value="${f.g}" style="width:56px"><span class="muted">g</span></div>`).join('')}
-    <div class="gitem"><button class="link" id="addFood">+ Ajouter un aliment</button></div></div>
+    <div class="gitem"><button class="link" id="addFood">+ Ajouter un aliment</button></div></div>` : ''}
 
   <div class="ghd">Exercices de référence</div>
   <div class="glist">${s.exercises.map((e, i) => `<div class="gitem"><button class="del" data-dele="${i}">⊖</button><input class="wide" data-en="${i}" value="${esc(e.n)}"><select data-et="${i}" style="width:120px"><option value="charge" ${e.t === 'charge' ? 'selected' : ''}>Avec charge</option><option value="pdc" ${e.t === 'pdc' ? 'selected' : ''}>Poids du corps</option></select></div>`).join('')}
@@ -1060,6 +1059,8 @@ function renderSettings() {
   <div class="ghd">Écran du jour</div>
   <div class="glist">
     <div class="gitem"><span>Afficher les pas</span><label class="switch"><input type="checkbox" data-b="showSteps" ${s.showSteps ? 'checked' : ''}><span></span></label></div>
+    <div class="gitem"><span>Évaluer ma journée (🟢🟡🔴)</span><label class="switch"><input type="checkbox" data-b="showRating" ${s.showRating ? 'checked' : ''}><span></span></label></div>
+    <div class="gitem"><span>Compter les protéines</span><label class="switch"><input type="checkbox" data-b="showProt" ${s.showProt ? 'checked' : ''}><span></span></label></div>
     <div class="gitem"><span>Afficher les calories</span><label class="switch"><input type="checkbox" data-b="showKcal" ${s.showKcal ? 'checked' : ''}><span></span></label></div>
   </div>
 
@@ -1079,11 +1080,11 @@ function bindSettings() {
   $$('#themeSeg button').forEach(b => b.onclick = () => { s.theme = b.dataset.t; applyTheme(); saveSettings(); renderSettings(); });
   $$('[data-n]').forEach(i => i.onchange = () => { wCache = null; s[i.dataset.n] = num(i.value) ?? (i.dataset.n === 'neck' ? null : DEFAULTS[i.dataset.n]); saveSettings(); toast('Enregistré ✓'); });
   $$('[data-k]').forEach(i => i.onchange = () => { if (i.value) { s[i.dataset.k] = i.value; saveSettings(); toast('Enregistré ✓'); } });
-  $$('[data-b]').forEach(i => i.onchange = () => { s[i.dataset.b] = i.checked; saveSettings(); });
+  $$('[data-b]').forEach(i => i.onchange = () => { s[i.dataset.b] = i.checked; saveSettings(); renderSettings(); });
   $$('[data-fn]').forEach(i => i.onchange = () => { s.foods[+i.dataset.fn].n = i.value.trim() || 'Aliment'; saveSettings(); });
   $$('[data-fg]').forEach(i => i.onchange = () => { s.foods[+i.dataset.fg].g = Math.round(num(i.value) || 0); saveSettings(); });
   $$('[data-delf]').forEach(b => b.onclick = () => { s.foods.splice(+b.dataset.delf, 1); saveSettings(); renderSettings(); });
-  $('#addFood').onclick = () => { s.foods.push({ n: 'Nouvel aliment', g: 20 }); saveSettings(); renderSettings(); };
+  if ($('#addFood')) $('#addFood').onclick = () => { s.foods.push({ n: 'Nouvel aliment', g: 20 }); saveSettings(); renderSettings(); };
   $$('[data-en]').forEach(i => i.onchange = () => { s.exercises[+i.dataset.en].n = i.value.trim() || 'Exercice'; saveSettings(); });
   $$('[data-et]').forEach(i => i.onchange = () => { s.exercises[+i.dataset.et].t = i.value; saveSettings(); });
   $$('[data-dele]').forEach(b => b.onclick = () => { if (confirm('Retirer cet exercice ? (l\'historique reste)')) { s.exercises.splice(+b.dataset.dele, 1); saveSettings(); renderSettings(); } });
