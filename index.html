@@ -1438,6 +1438,7 @@ const CUE_EX = {
 };
 // animé en JS (requestAnimationFrame) : fonctionne partout, y compris Safari iOS
 function figSvg(key, anim = true) {
+  if (key && key.startsWith('v2:')) { const k = key.slice(3); return getFig2(k) ? figSvg2(k) : ''; }
   const f = getFig(key); if (!f) return '';
   const side = f.a.s.length >= 5 && !/^(lateral|lunge|fly)/.test(key);
   const ln = (s, i, st, w, extra = '') => `<line data-i="${i}" x1="${s[0]}" y1="${s[1]}" x2="${s[2]}" y2="${s[3]}" stroke="${st}" stroke-width="${w}" stroke-linecap="round" ${extra}/>`;
@@ -1459,6 +1460,7 @@ function figLoop() {
     const ph = (ts % 2800) / 2800, t = ph < .45 ? ease(ph / .45) : ph < .5 ? 1 : ph < .95 ? 1 - ease((ph - .5) / .45) : 0;
     const L = (a, b) => a + (b - a) * t;
     svgs.forEach(svg => {
+      if (svg.dataset.fig2) { const f2 = getFig2(svg.dataset.fig2); if (f2) place2(svg, f2, t); return; }
       const f = getFig(svg.dataset.fig); if (!f) return;
       svg.querySelectorAll('line[data-i]').forEach(l => { const i = +l.dataset.i, a = f.a.s[i], b = f.b.s[i]; l.setAttribute('x1', L(a[0], b[0])); l.setAttribute('y1', L(a[1], b[1])); l.setAttribute('x2', L(a[2], b[2])); l.setAttribute('y2', L(a[3], b[3])); });
       const h = svg.querySelector('[data-h]'); h.setAttribute('cx', L(f.a.h[0], f.b.h[0])); h.setAttribute('cy', L(f.a.h[1], f.b.h[1]));
@@ -1523,12 +1525,197 @@ const FIGVAR = {
   lunge: { 'Bulgares': 'lungeb' }, squat: { 'Goblet': 'squatf', 'Front': 'squatf' }
 };
 function figKey(n, v) {
+  let k2 = (FIG2VAR[n] && FIG2VAR[n][v]) || FIG2MAP[n];
+  if (k2) { if ((k2 === 'bench_bb' || k2 === 'bench_db') && BENCH_ANG[v]) k2 += '@' + (-BENCH_ANG[v]); return 'v2:' + k2; }
+  if (n === 'Écarté haltères') return 'flyl';
+  if (n === 'Russian twist') return 'twist';
+  if (n === 'Oiseau') return 'rfly';
   if (n === 'Écarté poulie / pec deck') return { 'Poulie haute': 'flyh', 'Poulie basse': 'flyb' }[v] || 'flym';
   const b = FIGMAP[n]; if (!b) return null;
   if (b === 'bench' && BENCH_ANG[v]) return 'bench@' + BENCH_ANG[v];
   return (FIGVAR[b] && FIGVAR[b][v]) || b;
 }
 function getFig(k) { if (!k) return null; if (FIGS[k]) return FIGS[k]; const m = /^bench@(-?\d+)$/.exec(k); return m ? (FIGS[k] = benchAngle(+m[1])) : null; }
+
+/* ================= Muscu : moteur d'animation v2 (bonhomme articulé) ================= */
+// angles en degrés : 0 = vers l'avant (droite), 90 = haut, -90 = bas. Les mains/pieds peuvent être « posés » (cinématique inverse).
+const V2 = (l, d) => [l * Math.cos(d * Math.PI / 180), -l * Math.sin(d * Math.PI / 180)];
+const AD = (p, v) => [p[0] + v[0], p[1] + v[1]];
+function ik2(S, T, l1, l2, pref) {
+  let dx = T[0] - S[0], dy = T[1] - S[1], d = Math.hypot(dx, dy); const L = l1 + l2 - .01;
+  if (d > L) { dx *= L / d; dy *= L / d; d = L; }
+  d = Math.max(d, Math.abs(l1 - l2) + .5);
+  const base = Math.atan2(dy, dx), a = Math.acos(Math.max(-1, Math.min(1, (l1 * l1 + d * d - l2 * l2) / (2 * l1 * d))));
+  const c1 = [S[0] + l1 * Math.cos(base + a), S[1] + l1 * Math.sin(base + a)], c2 = [S[0] + l1 * Math.cos(base - a), S[1] + l1 * Math.sin(base - a)];
+  const pick = { f: (p, q) => p[0] > q[0], b: (p, q) => p[0] < q[0], u: (p, q) => p[1] < q[1], d: (p, q) => p[1] > q[1] }[pref || 'f'];
+  return [pick(c1, c2) ? c1 : c2, [S[0] + dx, S[1] + dy]];
+}
+function solve2(q) {
+  const P = q.P, S = AD(P, V2(q.tl ?? 26, q.t)), H = AD(S, V2(q.nl ?? 10, q.t + (q.hd ?? 0)));
+  const arm = (W, ua, fa, pref) => W ? ik2(S, W, 15, 14, pref) : (() => { const E = AD(S, V2(15, ua)); return [E, AD(E, V2(14, fa))]; })();
+  const leg = (A, th, sh, pref) => A ? ik2(P, A, 20, 20, pref) : (() => { const K = AD(P, V2(20, th)); return [K, AD(K, V2(20, sh))]; })();
+  const [E, W] = arm(q.W, q.ua ?? -90, q.fa ?? -90, q.eb), [K, A] = leg(q.A, q.th ?? -90, q.sh ?? -90, q.kb);
+  const T = q.T || AD(A, V2(7, q.ft ?? 0));
+  const a2 = q.W2 || q.ua2 != null, l2 = q.A2 || q.th2 != null;
+  const [E2, W2] = a2 ? arm(q.W2, q.ua2, q.fa2, q.eb2 ?? q.eb) : [AD(E, [-2.5, 1]), AD(W, [-2.5, 1])];
+  const [K2, A2] = l2 ? leg(q.A2, q.th2, q.sh2, q.kb2 ?? q.kb) : [AD(K, [-2.5, 1]), AD(A, [-2.5, 1])];
+  const T2 = l2 ? (q.T2 || AD(A2, V2(7, q.ft2 ?? q.ft ?? 0))) : AD(T, [-2.5, 1]);
+  const Wh = q.wa != null ? AD(W, V2(6, q.wa)) : W;
+  return { H, S, P, E, W, K, A, T, E2, W2, K2, A2, T2, Wh };
+}
+function lerpQ(a, b, t) {
+  const o = {};
+  new Set([...Object.keys(a), ...Object.keys(b)]).forEach(k => {
+    const x = a[k] ?? b[k], y = b[k] ?? a[k];
+    o[k] = Array.isArray(x) ? [x[0] + (y[0] - x[0]) * t, x[1] + (y[1] - x[1]) * t] : typeof x === 'number' ? x + (y - x) * t : (t < .5 ? x : y);
+  });
+  return o;
+}
+const EQ = {
+  barbell: '<circle r="7" fill="var(--accent)"/><circle r="2" fill="var(--card)"/>',
+  dumbbell: '<rect x="-6" y="-3" width="12" height="6" rx="2" fill="var(--accent)"/>',
+  kb: '<circle r="5" fill="var(--accent)"/>',
+  handle: '<rect x="-5" y="-1.6" width="10" height="3.2" rx="1.6" fill="var(--accent)"/>',
+  wheel: '<circle r="5.5" fill="none" stroke="var(--accent)" stroke-width="2.4"/>',
+  pad: '<circle r="3.6" fill="var(--sub)"/>',
+  sled: '<rect x="-2" y="-9" width="4" height="18" rx="2" fill="var(--sub)" transform="rotate(45)"/>'
+};
+// éléments du décor
+const P2 = {
+  floor: '',
+  bench: '<rect x="16" y="69" width="72" height="4" rx="2"/><line x1="24" y1="73" x2="24" y2="95"/><line x1="80" y1="73" x2="80" y2="95"/>',
+  benchHi: '<rect x="56" y="63" width="46" height="4" rx="2"/><line x1="62" y1="67" x2="62" y2="95"/><line x1="96" y1="67" x2="96" y2="95"/>',
+  bar: '<line x1="38" y1="4" x2="90" y2="4"/><line x1="88" y1="4" x2="88" y2="95"/>',
+  bars: '<line x1="44" y1="50" x2="82" y2="50"/><line x1="78" y1="50" x2="78" y2="95"/>',
+  seat: '<rect x="42" y="64" width="24" height="4" rx="2"/><line x1="54" y1="68" x2="54" y2="95"/>',
+  seatBack: '<rect x="42" y="64" width="24" height="4" rx="2"/><line x1="54" y1="68" x2="54" y2="95"/><rect x="38" y="32" width="4" height="36" rx="2"/>',
+  stack: '<rect x="96" y="-4" width="10" height="99" rx="2"/>',
+  wall: '<line x1="100" y1="-6" x2="100" y2="95"/>'
+};
+// seg. de tronc + couleurs
+function figSvg2(key, anim) {
+  const f = getFig2(key); if (!f) return '';
+  const L = (cls, w, st) => `<line class="${cls}" stroke="${st}" stroke-width="${w}" stroke-linecap="round"/>`;
+  const far = f.noFar ? '' : L('ua2', 4.4, 'var(--sub2)') + L('fa2', 4, 'var(--sub2)') + L('th2', 5.6, 'var(--sub2)') + L('sh2', 5, 'var(--sub2)') + L('ft2', 4, 'var(--sub2)');
+  const body = L('th', 5.8, 'var(--text)') + L('sh', 5.2, 'var(--text)') + L('ft', 4.2, 'var(--text)') + L('tr', 8, 'var(--text)') + L('nk', 4, 'var(--text)') + L('ua', 4.8, 'var(--text)') + L('fa', 4.2, 'var(--text)');
+  requestAnimationFrame(figLoop);
+  return `<svg viewBox="-4 -8 116 108" class="fig" data-fig2="${key}" data-anim><line x1="-4" y1="95.5" x2="112" y2="95.5" stroke="var(--sep)" stroke-width="1"/><g fill="none" stroke="var(--sub2)" stroke-width="2.4" stroke-linecap="round">${P2[f.p] ?? f.p ?? ''}</g>${f.cab ? '<line class="cab" stroke="var(--sub)" stroke-width="1.2"/>' : ''}${(f.eq || []).filter(e => e.far).map((e, i) => `<g class="eqf${i}" opacity=".45">${EQ[e.t]}</g>`).join('')}${far}${body}<circle class="hd" r="6.4" fill="var(--text)"/>${(f.eq || []).map((e, i) => `<g class="eq${i}">${EQ[e.t]}</g>`).join('')}</svg>`;
+}
+function place2(svg, f, t) {
+  const kf = f.k || [f.a, f.b];
+  // plusieurs étapes possibles : on découpe le cycle
+  const n = kf.length, seg = Math.min(n - 1, Math.floor(t * (n - 1))), lt = t * (n - 1) - seg;
+  const q = lerpQ(kf[seg], kf[Math.min(n - 1, seg + 1)], lt), j = solve2(q);
+  const set = (c, a, b) => { const l = svg.querySelector('.' + c); if (l) { l.setAttribute('x1', a[0]); l.setAttribute('y1', a[1]); l.setAttribute('x2', b[0]); l.setAttribute('y2', b[1]); } };
+  set('tr', j.P, j.S); set('nk', j.S, AD(j.S, V2(4, q.t + (q.hd ?? 0))));
+  set('ua', j.S, j.E); set('fa', j.E, j.W); set('th', j.P, j.K); set('sh', j.K, j.A); set('ft', j.A, j.T);
+  set('ua2', j.S, j.E2); set('fa2', j.E2, j.W2); set('th2', j.P, j.K2); set('sh2', j.K2, j.A2); set('ft2', j.A2, j.T2);
+  const h = svg.querySelector('.hd'); h.setAttribute('cx', j.H[0]); h.setAttribute('cy', j.H[1]);
+  (f.eq || []).forEach((e, i) => { const p = AD(j[e.at || 'Wh'], e.off || [0, 0]); svg.querySelector('.eq' + i)?.setAttribute('transform', `translate(${p[0]},${p[1]})`); if (e.far) { const p2 = AD(j[e.at2 || 'W2'], e.off || [0, 0]); svg.querySelector('.eqf' + i)?.setAttribute('transform', `translate(${p2[0]},${p2[1]})`); } });
+  if (f.cab) set('cab', f.cab, j[f.cabTo || 'W']);
+}
+// ——— les positions ———
+const LIE = { P: [40, 66], t: 0, hd: 10, A: [22, 95], kb: 'u', ft: 180 };           // allongé sur le banc
+const STAND = { P: [60, 55], t: 90, A: [60, 95], kb: 'f' };
+const SIT = { P: [50, 62], t: 92, A: [72, 95], kb: 'u' };
+const FIG2 = {
+  bench_bb: { p: 'bench', eq: [{ t: 'barbell' }], a: { ...LIE, W: [67, 37], eb: 'd' }, b: { ...LIE, W: [64, 61], eb: 'd' } },
+  bench_db: { p: 'bench', eq: [{ t: 'dumbbell', far: 1 }], a: { ...LIE, W: [67, 37], eb: 'd' }, b: { ...LIE, W: [62, 60], eb: 'd' } },
+  chestpress: { p: 'seatBack', eq: [{ t: 'handle' }], a: { ...SIT, P: [46, 62], W: [58, 40], eb: 'b' }, b: { ...SIT, P: [46, 62], W: [74, 38], eb: 'b' } },
+  pushup: { eq: [], a: { P: [52, 73], t: 22, hd: 5, W: [76, 93], eb: 'u', A: [14, 93], kb: 'u', ft: -70 }, b: { P: [52, 84], t: 8, hd: 5, W: [76, 93], eb: 'u', A: [14, 93], kb: 'u', ft: -70 } },
+  pushupd: { p: '<rect x="2" y="75" width="24" height="20" rx="2"/>', a: { P: [52, 71], t: 26, hd: 5, W: [77, 93], eb: 'u', A: [14, 74], kb: 'u', ft: -70 }, b: { P: [54, 82], t: 14, hd: 5, W: [77, 93], eb: 'u', A: [14, 74], kb: 'u', ft: -70 } },
+  dips: { p: 'bars', a: { P: [60, 47], t: 95, W: [62, 50], eb: 'b', A: [52, 80], kb: 'f', ft: -60 }, b: { P: [58, 64], t: 78, W: [62, 50], eb: 'b', A: [50, 94], kb: 'f', ft: -60 } },
+  dipsb: { p: '<rect x="26" y="64" width="26" height="4" rx="2"/><line x1="32" y1="68" x2="32" y2="95"/>', a: { P: [48, 62], t: 92, W: [44, 64], eb: 'b', A: [86, 93], kb: 'u', ft: 60 }, b: { P: [50, 78], t: 95, W: [44, 64], eb: 'b', A: [86, 93], kb: 'u', ft: 60 } },
+  pullup: { p: 'bar', a: { P: [60, 59], t: 90, W: [62, 4], eb: 'f', A: [50, 88], kb: 'f', ft: -70 }, b: { P: [62, 40], t: 96, W: [62, 4], eb: 'f', A: [52, 70], kb: 'f', ft: -70 } },
+  muscleup: { p: '<line x1="38" y1="40" x2="90" y2="40"/><line x1="88" y1="40" x2="88" y2="95"/>', k: [
+    { P: [60, 84], t: 90, W: [62, 40], eb: 'f', A: [50, 98], kb: 'f', ft: -70 },
+    { P: [62, 70], t: 98, W: [62, 40], eb: 'f', A: [50, 92], kb: 'f', ft: -70 },
+    { P: [64, 40], t: 92, W: [64, 40], eb: 'b', A: [58, 76], kb: 'f', ft: -70 }] },
+  latpd: { p: 'seat', cab: [62, -8], eq: [{ t: 'handle' }], a: { P: [50, 62], t: 95, W: [58, 6], eb: 'f', A: [70, 95], kb: 'u' }, b: { P: [50, 62], t: 100, W: [56, 42], eb: 'd', A: [70, 95], kb: 'u' } },
+  crow: { p: '<line x1="38" y1="78" x2="62" y2="78"/><line x1="50" y1="78" x2="50" y2="95"/><line x1="94" y1="70" x2="94" y2="95"/>', cab: [104, 64], eq: [{ t: 'handle' }], a: { P: [48, 74], t: 72, W: [82, 64], eb: 'd', A: [90, 86], kb: 'u', ft: 70 }, b: { P: [48, 74], t: 98, W: [54, 64], eb: 'b', A: [90, 86], kb: 'u', ft: 70 } },
+  brow: { eq: [{ t: 'barbell' }], a: { P: [48, 56], t: 24, hd: 10, W: [73, 76], eb: 'b', A: [52, 95], kb: 'f' }, b: { P: [48, 56], t: 26, hd: 10, W: [62, 60], eb: 'u', A: [52, 95], kb: 'f' } },
+  drow: { p: 'benchHi', eq: [{ t: 'dumbbell' }], a: { P: [54, 55], t: 6, hd: 8, W: [80, 84], eb: 'b', W2: [86, 62], A: [44, 95], kb: 'f', A2: [40, 62], kb2: 'd', ft2: 180 }, b: { P: [54, 55], t: 6, hd: 8, W: [66, 58], eb: 'u', W2: [86, 62], A: [44, 95], kb: 'f', A2: [40, 62], kb2: 'd', ft2: 180 } },
+  arow: { p: '<line x1="60" y1="48" x2="100" y2="48"/><line x1="96" y1="48" x2="96" y2="95"/>', a: { P: [53, 85], t: 12, hd: 4, W: [80, 48], eb: 'd', A: [14, 94], kb: 'd', T: [14, 87] }, b: { P: [48, 73], t: 31, hd: 4, W: [80, 48], eb: 'd', A: [14, 94], kb: 'd', T: [14, 87] } },
+  pullover: { p: 'bench', eq: [{ t: 'dumbbell' }], a: { ...LIE, W: [68, 38], eb: 'u' }, b: { ...LIE, W: [94, 70], eb: 'u' } },
+  facepull: { cab: [104, 24], eq: [{ t: 'handle' }], p: '<line x1="104" y1="-6" x2="104" y2="95"/>', a: { ...STAND, W: [86, 26], eb: 'd' }, b: { ...STAND, W: [66, 22], eb: 'u' } },
+  shrug: { eq: [{ t: 'dumbbell', far: 1 }], a: { ...STAND, ua: -90, fa: -90 }, b: { ...STAND, tl: 22.5, nl: 13.5, ua: -90, fa: -90 } },
+  dl: { eq: [{ t: 'barbell' }], a: { P: [44, 64], t: 24, hd: 8, W: [68, 88], eb: 'b', A: [52, 95], kb: 'f' }, b: { P: [55, 55], t: 90, W: [57, 82], eb: 'b', A: [53, 95], kb: 'f' } },
+  rdl: { eq: [{ t: 'barbell' }], a: { P: [55, 55], t: 90, W: [57, 80], eb: 'b', A: [54, 95], kb: 'f' }, b: { P: [48, 56], t: 16, hd: 8, W: [72, 80], eb: 'b', A: [54, 95], kb: 'f' } },
+  flever: { p: 'bar', a: { P: [72, 30], t: 75, W: [76, 4], eb: 'f', A: [76, 44], kb: 'u', ft: 0 }, b: { P: [56, 32], t: 6, hd: 0, W: [78, 4], eb: 'f', A: [16, 34], kb: 'd', ft: 180 } },
+  ohp_bb: { eq: [{ t: 'barbell' }], a: { ...STAND, W: [69, 28], eb: 'd' }, b: { ...STAND, W: [63, 0], eb: 'f' } },
+  ohp_db: { eq: [{ t: 'dumbbell', far: 1 }], a: { ...STAND, W: [67, 26], eb: 'd' }, b: { ...STAND, W: [62, 0], eb: 'f' } },
+  ohp_dbs: { p: 'seatBack', eq: [{ t: 'dumbbell', far: 1 }], a: { ...SIT, P: [46, 62], W: [54, 32], eb: 'd' }, b: { ...SIT, P: [46, 62], W: [48, 7], eb: 'f' } },
+  ohp_m: { p: 'seatBack', eq: [{ t: 'handle' }], a: { ...SIT, P: [46, 62], W: [56, 32], eb: 'd' }, b: { ...SIT, P: [46, 62], W: [50, 7], eb: 'f' } },
+  frontraise: { eq: [{ t: 'dumbbell' }], a: { ...STAND, W: [64, 57], eb: 'f' }, b: { ...STAND, W: [88, 28], eb: 'u' } },
+  rearfly: { eq: [{ t: 'dumbbell' }], a: { P: [50, 56], t: 20, hd: 8, W: [72, 76], eb: 'f', A: [54, 95], kb: 'f' }, b: { P: [50, 56], t: 20, hd: 8, W: [68, 48], eb: 'u', ua: 100, A: [54, 95], kb: 'f' } },
+  pike: { a: { P: [62, 55], t: -44, hd: 0, W: [82, 93], eb: 'b', A: [46, 93], kb: 'u', ft: -60 }, b: { P: [62, 62], t: -50, hd: 0, W: [82, 93], eb: 'b', A: [46, 93], kb: 'u', ft: -60 } },
+  hspu: { p: 'wall', a: { P: [76, 38], t: -90, hd: 0, W: [74, 93], eb: 'f', A: [80, -2], kb: 'f', ft: 0 }, b: { P: [76, 52], t: -90, hd: 0, W: [74, 93], eb: 'f', A: [80, 12], kb: 'f', ft: 0 } },
+  curl_db: { eq: [{ t: 'dumbbell' }], a: { ...STAND, ua: -92, fa: -90 }, b: { ...STAND, ua: -86, fa: 68 } },
+  curl_bb: { eq: [{ t: 'barbell' }], a: { ...STAND, ua: -92, fa: -88 }, b: { ...STAND, ua: -84, fa: 66 } },
+  curl_c: { cab: [68, 93], eq: [{ t: 'handle' }], a: { ...STAND, ua: -92, fa: -80 }, b: { ...STAND, ua: -84, fa: 66 } },
+  curl_inc: { p: '<line x1="36" y1="66" x2="60" y2="66" stroke-width="4"/><line x1="40" y1="66" x2="26" y2="36" stroke-width="4"/><line x1="48" y1="66" x2="48" y2="95"/>', eq: [{ t: 'dumbbell' }], a: { P: [46, 62], t: 118, A: [74, 95], kb: 'u', ua: -98, fa: -96 }, b: { P: [46, 62], t: 118, A: [74, 95], kb: 'u', ua: -98, fa: 50 } },
+  curl_conc: { p: 'seat', eq: [{ t: 'dumbbell' }], a: { P: [50, 62], t: 66, hd: -10, A: [72, 95], kb: 'u', ua: -78, fa: -95 }, b: { P: [50, 62], t: 66, hd: -10, A: [72, 95], kb: 'u', ua: -78, fa: 85 } },
+  pushdown: { cab: [74, -8], eq: [{ t: 'handle' }], p: '<line x1="80" y1="-6" x2="80" y2="95"/>', a: { ...STAND, t: 96, ua: -84, fa: 32 }, b: { ...STAND, t: 96, ua: -84, fa: -86 } },
+  skull: { p: 'bench', eq: [{ t: 'barbell' }], a: { ...LIE, ua: 98, fa: 92 }, b: { ...LIE, ua: 104, fa: -32 } },
+  ohext: { eq: [{ t: 'dumbbell' }], a: { ...STAND, ua: 94, fa: 92 }, b: { ...STAND, ua: 98, fa: -112 } },
+  wrist: { p: 'seat', eq: [{ t: 'dumbbell', at: 'Wh' }], a: { ...SIT, ua: -50, fa: -2, wa: -40 }, b: { ...SIT, ua: -50, fa: -2, wa: 40 } },
+  squat_bb: { eq: [{ t: 'barbell', at: 'S', off: [-2, -3] }], a: { ...STAND, ua: -140, fa: 70, W: null }, b: { P: [44, 70], t: 52, A: [60, 95], kb: 'f', ua: -150, fa: 60 } },
+  squat_smith: { p: '<line x1="56" y1="-6" x2="56" y2="95"/><line x1="64" y1="-6" x2="64" y2="95"/>', eq: [{ t: 'barbell', at: 'S', off: [-2, -3] }], a: { ...STAND, ua: -140, fa: 70 }, b: { P: [46, 70], t: 60, A: [62, 95], kb: 'f', ua: -150, fa: 60 } },
+  squat_g: { eq: [{ t: 'kb' }], a: { ...STAND, W: [68, 36], eb: 'd' }, b: { P: [46, 71], t: 62, A: [60, 95], kb: 'f', W: [66, 52], eb: 'd' } },
+  squat_f: { eq: [{ t: 'barbell', at: 'S', off: [5, -1] }], a: { ...STAND, W: [64, 28], eb: 'f' }, b: { P: [47, 72], t: 66, A: [60, 95], kb: 'f', W: [62, 47], eb: 'f' } },
+  squat_bw: { a: { ...STAND, ua: 0, fa: 0 }, b: { P: [44, 71], t: 56, A: [60, 95], kb: 'f', ua: 10, fa: 10 } },
+  pistol: { a: { ...STAND, ua: 0, fa: 0, A2: [66, 92], kb2: 'f' }, b: { P: [46, 76], t: 58, A: [60, 95], kb: 'f', ua: 8, fa: 8, A2: [86, 72], kb2: 'u' } },
+  legpress: { p: '<line x1="8" y1="34" x2="44" y2="80" stroke-width="4"/><line x1="40" y1="80" x2="40" y2="95"/><line x1="56" y1="66" x2="94" y2="28"/>', eq: [{ t: 'sled', at: 'A', off: [3, -3] }], a: { P: [36, 70], t: 128, hd: 0, W: [40, 74], eb: 'd', A: [58, 50], kb: 'u', ft: 45 }, b: { P: [36, 70], t: 128, hd: 0, W: [40, 74], eb: 'd', A: [72, 36], kb: 'u', ft: 45 } },
+  lunge: { a: { ...STAND, A: [64, 95], A2: [56, 95], kb2: 'f' }, b: { P: [58, 70], t: 88, A: [78, 95], kb: 'f', A2: [34, 95], kb2: 'd', ft2: -40 } },
+  lunge_b: { p: '<rect x="14" y="70" width="24" height="4" rx="2"/><line x1="26" y1="74" x2="26" y2="95"/>', a: { P: [58, 58], t: 90, A: [70, 95], kb: 'f', A2: [34, 69], kb2: 'd', ft2: 200 }, b: { P: [56, 72], t: 84, A: [72, 95], kb: 'f', A2: [34, 69], kb2: 'd', ft2: 200 } },
+  lunge_r: { a: { ...STAND, A: [62, 95], A2: [58, 95], kb2: 'f' }, b: { P: [56, 70], t: 88, A: [70, 95], kb: 'f', A2: [30, 95], kb2: 'd', ft2: -40 } },
+  legext: { p: 'seatBack', eq: [{ t: 'pad', at: 'A', off: [2, -1] }], a: { P: [46, 62], t: 94, W: [52, 66], eb: 'd', A: [64, 84], kb: 'u', ft: -10 }, b: { P: [46, 62], t: 94, W: [52, 66], eb: 'd', A: [86, 58], kb: 'u', ft: 70 } },
+  legcurl: { p: '<rect x="12" y="62" width="92" height="4" rx="2"/><line x1="24" y1="66" x2="24" y2="95"/><line x1="92" y1="66" x2="92" y2="95"/>', eq: [{ t: 'pad', at: 'A', off: [0, -3] }], a: { P: [56, 58], t: 0, hd: 10, W: [96, 61], eb: 'd', A: [16, 58], kb: 'd', ft: 200 }, b: { P: [56, 58], t: 0, hd: 10, W: [96, 61], eb: 'd', A: [44, 36], kb: 'd', ft: 100 } },
+  legcurl_s: { p: 'seatBack', eq: [{ t: 'pad', at: 'A', off: [2, 2] }], a: { P: [46, 62], t: 94, W: [52, 66], eb: 'd', A: [86, 58], kb: 'u', ft: 70 }, b: { P: [46, 62], t: 94, W: [52, 66], eb: 'd', A: [60, 82], kb: 'u', ft: -20 } },
+  hipthrust: { p: '<rect x="10" y="56" width="28" height="4" rx="2"/><line x1="18" y1="60" x2="18" y2="95"/>', eq: [{ t: 'barbell', at: 'P', off: [2, -7] }], a: { P: [56, 80], t: 132, hd: 0, W: [58, 74], eb: 'u', A: [78, 95], kb: 'u' }, b: { P: [60, 60], t: 176, hd: 10, W: [62, 54], eb: 'u', A: [78, 95], kb: 'u' } },
+  calf: { p: '<rect x="54" y="92" width="26" height="4"/>', eq: [{ t: 'dumbbell' }], a: { ...STAND, P: [60, 52], A: [60, 92], T: [68, 92], W: [61, 54], eb: 'f' }, b: { ...STAND, P: [60, 46], A: [60, 86], T: [68, 92], W: [61, 48], eb: 'f' } },
+  calf_s: { p: 'seat', eq: [{ t: 'pad', at: 'K', off: [0, -4] }], a: { ...SIT, A: [72, 92], T: [80, 93], W: [70, 58], eb: 'd' }, b: { ...SIT, A: [72, 86], T: [80, 93], W: [70, 54], eb: 'd' } },
+  hlr: { p: 'bar', a: { P: [60, 59], t: 90, W: [62, 4], eb: 'f', A: [60, 95], kb: 'f', ft: -80 }, b: { P: [58, 60], t: 92, W: [62, 4], eb: 'f', A: [96, 54], kb: 'u', ft: 80 } },
+  llr: { a: { P: [56, 90], t: 180, hd: 0, W: [62, 93], ua: -150, A: [94, 91], kb: 'u', ft: 90 }, b: { P: [56, 90], t: 180, hd: 0, W: [62, 93], ua: -150, A: [58, 50], kb: 'f', ft: 0 } },
+  crr: { p: '<rect x="40" y="24" width="4" height="40" rx="2"/><rect x="44" y="40" width="20" height="4" rx="2"/><line x1="42" y1="64" x2="42" y2="95"/>', a: { P: [48, 60], t: 90, W: [60, 42], ua: 0, A: [50, 98], kb: 'f', ft: -80 }, b: { P: [48, 60], t: 90, W: [60, 42], ua: 0, A: [86, 54], kb: 'u', ft: 80 } },
+  crunch: { a: { P: [56, 89], t: 178, hd: 0, W: [26, 86], eb: 'u', A: [80, 93], kb: 'u', ft: 0 }, b: { P: [56, 89], t: 146, hd: 14, W: [36, 66], eb: 'u', A: [80, 93], kb: 'u', ft: 0 } },
+  plank: { a: { P: [50, 82], t: 8, hd: 4, W: [92, 92], eb: 'd', A: [14, 92], kb: 'u', ft: -70 }, b: { P: [50, 80], t: 10, hd: 4, W: [92, 92], eb: 'd', A: [14, 92], kb: 'u', ft: -70 } },
+  lsit: { p: '<line x1="56" y1="74" x2="68" y2="74"/><line x1="58" y1="74" x2="58" y2="95"/><line x1="66" y1="74" x2="66" y2="95"/>', a: { P: [60, 68], t: 92, W: [62, 73], eb: 'b', A: [96, 68], kb: 'u', ft: 70 }, b: { P: [60, 66], t: 92, W: [62, 73], eb: 'b', A: [98, 64], kb: 'u', ft: 70 } },
+  rollout: { eq: [{ t: 'wheel', off: [2, 2] }], a: { P: [42, 76], t: 40, hd: -10, W: [64, 87], eb: 'f', A: [20, 95], kb: 'd', ft: 180 }, b: { P: [52, 84], t: 8, hd: 0, W: [98, 87], eb: 'f', A: [20, 95], kb: 'd', ft: 180 } }
+};
+// banc incliné / décliné pour les développés couchés
+function inclined(key, deg) {
+  // le buste suit le banc ; la charge reste à peu près à la verticale des épaules
+  const f = FIG2[key], piv = [40, 66], R = p => p && rotP(p, piv, -deg), S0 = AD(piv, V2(26, 0)), S1 = AD(piv, V2(26, deg));
+  const tr = q => ({ ...q, t: q.t + deg, W: q.W && AD(R(q.W), [(S0[0] - R(S0)[0]) * .7, 0]) });
+  const back = rotP([88, 71], [40, 71], -deg);
+  return { ...f, a: tr(f.a), b: tr(f.b), p: `<line x1="16" y1="71" x2="40" y2="71" stroke-width="4"/><line x1="40" y1="71" x2="${back[0]}" y2="${back[1]}" stroke-width="4"/><line x1="24" y1="73" x2="24" y2="95"/><line x1="40" y1="73" x2="40" y2="95"/>` };
+}
+const FIG2MAP = {
+  'Développé couché barre': 'bench_bb', 'Développé haltères': 'bench_db', 'Développé machine': 'chestpress', 'Pompes': 'pushup', 'Dips': 'dips', 'Dips banc': 'dipsb',
+  'Tractions': 'pullup', 'Muscle-up': 'muscleup', 'Tirage vertical': 'latpd', 'Tirage horizontal poulie': 'crow', 'Rowing barre': 'brow', 'Rowing haltère': 'drow',
+  'Australian rows': 'arow', 'Pull-over': 'pullover', 'Face pull': 'facepull', 'Shrugs': 'shrug', 'Soulevé de terre': 'dl', 'Front lever': 'flever',
+  'Développé militaire': 'ohp_bb', 'Élévations frontales': 'frontraise', 'Pike push-up': 'pike', 'Handstand push-up': 'hspu',
+  'Curl haltères': 'curl_db', 'Curl barre': 'curl_bb', 'Curl poulie': 'curl_c', 'Extension triceps poulie': 'pushdown', 'Barre au front': 'skull',
+  'Extension nuque haltère': 'ohext', 'Curl poignets': 'wrist', 'Squat': 'squat_bb', 'Presse à cuisses': 'legpress', 'Fentes': 'lunge', 'Leg extension': 'legext',
+  'Leg curl': 'legcurl', 'Soulevé de terre roumain': 'rdl', 'Hip thrust': 'hipthrust', 'Mollets': 'calf', 'Pistol squat': 'pistol', 'Squat poids du corps': 'squat_bw',
+  'Relevés de jambes': 'hlr', 'Crunch': 'crunch', 'Gainage': 'plank', 'L-sit': 'lsit', 'Roulette abdos': 'rollout'
+};
+const FIG2VAR = {
+  'Développé militaire': { 'Haltères assis': 'ohp_dbs', 'Haltères debout': 'ohp_db', 'Machine': 'ohp_m', 'Arnold': 'ohp_dbs' },
+  'Pompes': { 'Déclinées': 'pushupd' }, 'Curl haltères': { 'Incliné': 'curl_inc', 'Concentration': 'curl_conc' },
+  'Squat': { 'Goblet': 'squat_g', 'Front': 'squat_f', 'Smith': 'squat_smith' }, 'Fentes': { 'Bulgares': 'lunge_b', 'Arrière': 'lunge_r' },
+  'Leg curl': { 'Assis': 'legcurl_s' }, 'Mollets': { 'Assis': 'calf_s' }, 'Relevés de jambes': { 'Au sol': 'llr', 'Chaise romaine': 'crr' }
+};
+function getFig2(k) {
+  if (FIG2[k]) return FIG2[k];
+  const m = /^(\w+)@(-?\d+)$/.exec(k); if (m && FIG2[m[1]]) return FIG2[k] = inclined(m[1], +m[2]);
+  return null;
+}
+// Écarté haltères : vu depuis les pieds (on voit les bras s'ouvrir)
+FIGS.flyl = { a: { h: [60, 54], s: [[47, 62, 73, 62], [47, 62, 52, 48], [52, 48, 57, 36], [73, 62, 68, 48], [68, 48, 63, 36], [60, 62, 60, 66]] }, b: { h: [60, 54], s: [[47, 62, 73, 62], [47, 62, 32, 58], [32, 58, 19, 66], [73, 62, 88, 58], [88, 58, 101, 66], [60, 62, 60, 66]] }, p: '<rect x="50" y="66" width="20" height="5" rx="2"/><line x1="54" y1="71" x2="54" y2="95"/><line x1="66" y1="71" x2="66" y2="95"/>', l: [2, 4] };
+FIGS.rfly = { a: { h: [60, 46], s: [[60, 51, 60, 60], [48, 52, 72, 52], [48, 52, 47, 76], [72, 52, 73, 76], [60, 60, 53, 95], [60, 60, 67, 95]] }, b: { h: [60, 46], s: [[60, 51, 60, 60], [48, 52, 72, 52], [48, 52, 25, 50], [72, 52, 95, 50], [60, 60, 53, 95], [60, 60, 67, 95]] }, l: [2, 3] };
+FIGS.twist = { a: { h: [60, 38], s: [[60, 46, 62, 74], [50, 50, 70, 50], [50, 50, 42, 62], [70, 50, 44, 64], [62, 74, 80, 64], [80, 64, 94, 74]] }, b: { h: [60, 38], s: [[60, 46, 62, 74], [50, 50, 70, 50], [50, 50, 76, 64], [70, 50, 80, 62], [62, 74, 80, 64], [80, 64, 94, 74]] }, l: [3] };
 
 function exPreview(n, onAdd, v0) {
   const e = exInfo(n); let v = v0 ?? (e.v ? e.v[0] : null);
