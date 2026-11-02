@@ -466,20 +466,14 @@ function rate(endDate = today(), span = 21) {
   return linreg(pts).slope * 7;
 }
 function lastWeight() { const w = weights(); return w.length ? w[w.length - 1] : null; }
-function lastWeekly(field, before = '9999') { const ds = sortedDates(S.weekly).filter(d => d <= before && S.weekly[d][field] != null); return ds.length ? [ds[ds.length - 1], S.weekly[ds[ds.length - 1]][field]] : null; }
-function neckVal(at) { const n = lastWeekly('neck', at); return n ? n[1] : st().neck; }
-function navy(waist, neck, h = st().height) { if (!waist || !neck || waist <= neck) return null; return 495 / (1.0324 - 0.19077 * Math.log10(waist - neck) + 0.15456 * Math.log10(h)) - 450; }
 function weightNear(date) { const a = avg7At(date); if (a != null) return a; const w = weights(); if (!w.length) return null; let best = w[0]; w.forEach(x => { if (Math.abs(diff(x[0], date)) < Math.abs(diff(best[0], date))) best = x; }); return Math.abs(diff(best[0], date)) <= 10 ? best[1] : null; }
-function bfSeries() { return sortedDates(S.weekly).filter(d => S.weekly[d].waist).map(d => { const bf = navy(S.weekly[d].waist, neckVal(d)); const w = weightNear(d); return bf != null ? { d, bf, w, fat: w != null ? w * bf / 100 : null, lean: w != null ? w * (1 - bf / 100) : null } : null; }).filter(Boolean); }
 function bedTarget(date) {
   const s = st(); const start = tMin(s.bedStart), goal = tMin(s.bedGoal);
   const n = Math.max(0, Math.floor(diff(s.startDate, date) / s.bedStepDays));
   return Math.max(goal, start - n * s.bedStepMin);
 }
-function perfMetric(p, t) { if (!p || p.reps == null) return null; const load = num(p.load) || 0; if (t === 'charge') return load ? load * (1 + p.reps / 30) : null; return p.reps; }
 function protStreak() { let n = 0, d = today(); if (!((day(d).protein || 0) >= st().protMin)) d = addDays(d, -1); while ((day(d).protein || 0) >= st().protMin) { n++; d = addDays(d, -1); } return n; }
 function logStreak() { let n = 0, d = today(); if (!S.days[d]) d = addDays(d, -1); while (S.days[d]) { n++; d = addDays(d, -1); } return n; }
-function weekDue() { const ds = sortedDates(S.weekly); return !ds.length || diff(ds[ds.length - 1], today()) >= 7; }
 
 /* ================= Charts (SVG maison) ================= */
 function chart(el, o) {
@@ -547,16 +541,15 @@ function renderToday() {
   const v = $('#v-today');
   v.innerHTML = `
   <div class="lt">${isToday ? "Aujourd'hui" : esc(dLong(date)).replace(/^./, c => c.toUpperCase())}</div>
-  <div class="subt">${dayN > 0 ? `Jour ${dayN} de la sèche` : 'Avant le début de la sèche'}${logStreak() > 1 ? ` · 🔥 ${logStreak()} jours d'affilée` : ''}</div>
+  <div class="subt">${dayN > 0 ? `Jour ${dayN}` : ''}${logStreak() > 1 ? ` · 🔥 ${logStreak()}` : ''}</div>
   <div class="datenav">
     <button class="arr" id="dPrev">‹</button>
     <div class="datelbl">${isToday ? esc(dLong(date)) : `<span class="pill acc">${esc(dLong(date))}</span>`}<input type="date" id="dPick" value="${date}" max="${today()}"></div>
     <button class="arr" id="dNext" ${isToday ? 'disabled' : ''}>›</button>
   </div>
-  ${isToday && weekDue() ? `<div class="card" style="background:linear-gradient(135deg,color-mix(in srgb,var(--indigo) 35%,var(--card)),var(--card))"><div class="coach"><div class="ic" style="background:var(--indigo)">📏</div><div style="flex:1"><b>Check-in de la semaine</b><p>Tour de taille + tes 3 perfs. 30 secondes.</p></div></div><button class="btn" style="margin-top:12px" id="openWeek">Faire le check-in</button></div>` : ''}
 
   <div class="card">
-    <h3>Poids <span class="r muted">${a7 != null ? `moy. 7 j : ${fmt(a7)} kg` : 'optionnel'}</span></h3>
+    <h3>Poids <span class="r muted">${a7 != null ? `moy. ${fmt(a7)}` : ''}</span></h3>
     <div class="seg" id="wWhen" style="max-width:240px;margin:0 auto 6px">${[[0, '☀️ Matin'], [1, '🌙 Soir']].map(([k, l]) => `<button data-pm="${k}" class="${+pmSel === k ? 'on' : ''}">${l}</button>`).join('')}</div>
     <div class="wstep"><button data-w="-1">−</button><div class="wv"><input id="wIn" inputmode="decimal" placeholder="${lw ? fmt(lw[1]) : '–'}" value="${d.weight != null ? fmt(d.weight) : ''}"><span class="u">kg</span></div><button data-w="1">+</button></div>
     <div class="wmeta" id="wMeta">${weightMeta(d, lw, adj, off)}</div>
@@ -565,7 +558,6 @@ function renderToday() {
   ${s.showRating ? `<div class="card">
     <h3>Ta journée côté bouffe</h3>
     <div class="choices">${[1, 2, 3].map(r => `<button class="choice ${d.rating === r ? 'on' : ''}" data-v="${r}"><span class="e">${RATING[r].e}</span>${RATING[r].l}</button>`).join('')}</div>
-    <div class="small muted" style="margin-top:8px">🟢 dans les clous · 🟡 un peu au-dessus · 🔴 gros écart (resto, soirée…)</div>
   </div>` : ''}
 
   ${s.showProt ? `<div class="card">
@@ -579,43 +571,41 @@ function renderToday() {
       </div>
     </div>
     <div class="chips">${s.foods.map((f, i) => `<button class="chip" data-f="${i}">${esc(f.n)}<b>+${f.g}</b></button>`).join('')}<button class="chip ghost" id="pFree">+ autre</button></div>
-  </div>` : `<div class="card"><div class="coach"><div class="ic" style="background:color-mix(in srgb,var(--green) 22%,transparent)">✋</div><div><b>Repère repas</b><p>À chaque repas : 1 paume de protéines, 1 poing de féculents (¾ le soir), 2 poings de légumes. Ta balance fera le reste.</p><button class="link small" id="openGuide" style="margin-top:6px">Ouvrir le guide bouffe ›</button></div></div></div>`}
+  </div>` : ''}
 
   <div class="card">
-    <h3>Séance <span class="r muted">${sessionsThisWeek()} cette semaine</span></h3>
+    <h3>Séance <span class="r muted">${sessionsThisWeek()}/sem.</span></h3>
     <div class="chips">${s.sessions.map(x => `<button class="chip ${d.session === x ? 'on' : ''}" data-s="${esc(x)}">${esc(x)}</button>`).join('')}</div>
-    <button class="btn sec" id="openWk" style="margin-top:10px">${d.workout?.ex?.length ? `📝 ${d.workout.ex.length} exo${d.workout.ex.length > 1 ? 's' : ''} · ${d.workout.ex.reduce((a, x) => a + (x.sets || []).length, 0)} séries — voir / modifier` : '📝 Noter les exos de la séance'}</button>
-    ${d.session ? `<textarea class="tinput" id="sNote" rows="1" placeholder="Note (perf, sensations…)" style="margin-top:10px">${esc(d.note || '')}</textarea>` : ''}
+    <button class="btn sec" id="openWk" style="margin-top:10px">${d.workout?.ex?.length ? `${d.workout.ex.length} exo${d.workout.ex.length > 1 ? 's' : ''} · ${d.workout.ex.reduce((a, x) => a + (x.sets || []).length, 0)} séries` : '+ Exercices'}</button>
+    ${d.session ? `<textarea class="tinput" id="sNote" rows="1" placeholder="Note" style="margin-top:10px">${esc(d.note || '')}</textarea>` : ''}
   </div>
 
   <div class="card">
-    <h3>Nuit dernière <span class="r muted">${dur ? `<b style="color:var(--text)">${durT(dur)}</b> de sommeil` : ''}</span></h3>
+    <h3>Sommeil <span class="r muted">${dur ? `<b style="color:var(--text)">${durT(dur)}</b>` : ''}</span></h3>
     <div class="sleepgrid">
       ${[['bed', 'Coucher'], ['wake', 'Réveil']].map(([k, l]) => `<div class="tbox"><span>${l}</span><div class="tst"><button data-tk="${k}" data-td="-15">−</button><div class="tv num" id="tv-${k}">${d[k] ? minT(tMin(d[k])) : '–'}<input type="time" data-tp="${k}" value="${d[k] || ''}"></div><button data-tk="${k}" data-td="15">+</button></div></div>`).join('')}
     </div>
     <div class="row between" style="margin-top:10px">
-      <span class="small muted">🌙 Ce soir, vise <b style="color:var(--text)">${minT(tgtNext)}</b>${d.bed ? ` · hier ${tMin(d.bed) <= tgt ? '✅' : `+${Math.round(tMin(d.bed) - tgt)} min`}` : ''}</span>
+      <span class="small muted">🎯 ${minT(tgtNext)}${d.bed && tMin(d.bed) <= tgt ? ' ✅' : ''}</span>
       ${!d.bed && prev.bed ? `<button class="link small" id="sameSleep">Comme hier</button>` : ''}
     </div>
   </div>
 
   ${s.showSteps ? `<div class="card">
-    <h3>👟 Pas <span class="r muted" id="stepsOk">${d.steps ? '✓ enregistré' : 'objectif ~10 000'}</span></h3>
-    <input class="tinput num" id="steps" inputmode="numeric" pattern="[0-9]*" enterkeyhint="done" placeholder="ex. 9500" value="${d.steps ?? ''}" style="font-size:22px;font-weight:600">
+    <h3>Pas <span class="r muted" id="stepsOk">${d.steps ? '✓' : ''}</span></h3>
+    <input class="tinput num" id="steps" inputmode="numeric" pattern="[0-9]*" enterkeyhint="done" placeholder="10000" value="${d.steps ?? ''}" style="font-size:22px;font-weight:600">
     <div class="chips" style="margin-top:10px">${[5000, 8000, 10000, 12000, 15000].map(n => `<button class="chip ${d.steps === n ? 'on' : ''}" data-st="${n}">${n / 1000}k</button>`).join('')}</div>
-    <div class="small muted" style="margin-top:8px">Tes pas sont dans l'app <b>Santé</b> de l'iPhone → Parcourir → Activité → Pas.</div>
   </div>` : ''}
-  ${s.showKcal ? `<div class="card"><div class="field"><label>🔥 Calories <span class="small muted">(optionnel)</span></label><input id="kcal" inputmode="numeric" placeholder="${s.kcalMin}" value="${d.kcal ?? ''}"></div></div>` : ''}
+  ${s.showKcal ? `<div class="card"><div class="field"><label>Calories</label><input id="kcal" inputmode="numeric" placeholder="${s.kcalMin}" value="${d.kcal ?? ''}"></div></div>` : ''}
   `;
   bindToday();
 }
 function weightMeta(d, lw, adj, off) {
-  if (d.weight == null) return lw ? `Dernière pesée : ${fmt(lw[1])} kg le ${dShort(lw[0])}` : 'Idéal : le matin à jeun. Le soir ça marche aussi, je corrige.';
+  if (d.weight == null) return lw ? `${fmt(lw[1])} kg le ${dShort(lw[0])}` : '';
   const parts = [];
-  if (d.weight_pm) parts.push(`≈ <b style="color:var(--text)">${fmt(adj)} kg</b> équivalent matin <span class="muted">(−${fmt(off.v)} kg ${off.auto ? 'calculé sur tes pesées' : 'en moyenne le soir'})</span>`);
-  if (lw) parts.push(`${sgn(adj - lw[1])} kg vs ${dShort(lw[0])} <span class="muted">— regarde surtout la moyenne</span>`);
-  else parts.push('1re pesée : c\'est ta référence 📍');
-  return parts.join('<br>');
+  if (d.weight_pm) parts.push(`≈ ${fmt(adj)} kg matin`);
+  if (lw) parts.push(`${sgn(adj - lw[1])} kg`);
+  return parts.join(' · ');
 }
 function sessionsThisWeek() { const t = pd(today()); const mon = addDays(today(), -((t.getDay() + 6) % 7)); return sortedDates(S.days).filter(d => d >= mon && S.days[d].session).length; }
 function bindToday() {
@@ -647,56 +637,17 @@ function bindToday() {
   $$('[data-tp]').forEach(i => i.onchange = () => { setDay(date, { [i.dataset.tp]: i.value || null }); renderToday(); });
   if ($('#sameSleep')) $('#sameSleep').onclick = () => { const p = day(addDays(date, -1)); setDay(date, { bed: p.bed, wake: p.wake }); renderToday(); toast('Copié depuis hier'); };
   if ($('#steps')) {
-    const si = $('#steps'), save = () => { const n = num(si.value.replace(/\s/g, '')); setDay(date, { steps: n != null ? Math.round(n) : null }); $('#stepsOk').textContent = n != null ? '✓ enregistré' : ''; };
+    const si = $('#steps'), save = () => { const n = num(si.value.replace(/\s/g, '')); setDay(date, { steps: n != null ? Math.round(n) : null }); $('#stepsOk').textContent = n != null ? '✓' : ''; };
     si.oninput = () => { clearTimeout(timers.st); timers.st = setTimeout(save, 700); };
     si.onblur = () => { clearTimeout(timers.st); save(); };
     si.onkeydown = e => { if (e.key === 'Enter') si.blur(); };
     $$('[data-st]').forEach(b => b.onclick = () => { setDay(date, { steps: +b.dataset.st }); renderToday(); toast('Pas enregistrés ✓'); });
   }
   if ($('#kcal')) $('#kcal').onchange = e => setDay(date, { kcal: num(e.target.value) != null ? Math.round(num(e.target.value)) : null });
-  if ($('#openWeek')) $('#openWeek').onclick = () => openWeekly(today());
   $('#openWk').onclick = () => openWorkout(date);
-  if ($('#openGuide')) $('#openGuide').onclick = () => go('guide');
 }
 function addProt(date, n, g) { const d = day(date), log = [...d.protein_log, { n, g }]; setDay(date, { protein_log: log, protein: log.reduce((s, x) => s + x.g, 0) }); renderToday(); toast(`+${g} g · ${n}`); }
 
-/* ================= Check-in hebdo ================= */
-function openWeekly(date) {
-  const ex = S.weekly[date], s = st();
-  const lastW = lastWeekly('waist'), lastN = lastWeekly('neck');
-  const lastPerf = n => { const ds = sortedDates(S.weekly).filter(d => d < date).reverse(); for (const d of ds) { const p = (S.weekly[d].perfs || []).find(x => x.n === n); if (p) return p; } return null; };
-  const ov = sheet(`
-    <div class="hd"><button class="link" data-close>Annuler</button><b>Check-in</b><button class="link" id="wkSave" style="font-weight:700">OK</button></div>
-    <div class="card">
-      <div class="field"><label>Date</label><input type="date" id="wkDate" value="${date}" max="${today()}"></div>
-      <div class="field"><label>Tour de taille <span class="small muted">au nombril</span></label><input id="wkWaist" inputmode="decimal" placeholder="${lastW ? fmt(lastW[1]) : 'cm'}" value="${ex?.waist != null ? fmt(ex.waist) : ''}"></div>
-      <div class="field"><label>Tour de cou <span class="small muted">sous la pomme d'Adam</span></label><input id="wkNeck" inputmode="decimal" placeholder="${lastN ? fmt(lastN[1]) : (s.neck ? fmt(s.neck) : 'cm')}" value="${ex?.neck != null ? fmt(ex.neck) : ''}"></div>
-    </div>
-    <div class="small muted" style="margin:-4px 4px 12px">Le cou sert à estimer ton % de gras (méthode Navy). Une mesure de temps en temps suffit — il bouge peu.</div>
-    <div class="sh" style="margin-top:8px">Perfs <small>meilleure série</small></div>
-    <div class="card">
-    ${s.exercises.map((e, i) => { const p = (ex?.perfs || []).find(x => x.n === e.n), lp = lastPerf(e.n); return `
-      <div style="padding:8px 0;${i ? 'border-top:.5px solid var(--sep)' : ''}">
-        <div class="row between"><b>${esc(e.n)}</b><span class="small muted">${lp ? `dernière : ${lp.load ? fmt(lp.load, 1).replace(',0', '') + ' kg × ' : ''}${lp.reps}` : ''}</span></div>
-        <div class="row" style="margin-top:8px">
-          <input class="tinput" data-ex="${i}" data-k="load" inputmode="decimal" placeholder="${e.t === 'charge' ? 'kg (1 haltère)' : 'Lest kg (0)'}" value="${p?.load ?? ''}">
-          <span class="muted">×</span>
-          <input class="tinput" data-ex="${i}" data-k="reps" inputmode="numeric" placeholder="Reps" value="${p?.reps ?? ''}">
-        </div>
-      </div>`; }).join('')}
-    </div>
-    ${ex ? `<button class="btn danger" id="wkDel">Supprimer ce check-in</button>` : ''}
-  `);
-  $('#wkSave', ov).onclick = () => {
-    const d = $('#wkDate', ov).value || date;
-    const perfs = s.exercises.map((e, i) => ({ n: e.n, load: num($(`[data-ex="${i}"][data-k=load]`, ov).value), reps: num($(`[data-ex="${i}"][data-k=reps]`, ov).value) })).filter(p => p.reps != null);
-    const row = { waist: num($('#wkWaist', ov).value), neck: num($('#wkNeck', ov).value), perfs };
-    if (row.waist == null && row.neck == null && !perfs.length) { toast('Rien à enregistrer'); return; }
-    if (d !== date && S.weekly[date]) setWeek(date, null);
-    setWeek(d, row); ov.remove(); toast('Check-in enregistré ✓'); render();
-  };
-  if ($('#wkDel', ov)) $('#wkDel', ov).onclick = () => { if (confirm('Supprimer ce check-in ?')) { setWeek(date, null); ov.remove(); render(); } };
-}
 function sheet(html) {
   const ov = document.createElement('div'); ov.className = 'overlay';
   ov.innerHTML = `<div class="sheet"><div class="grab"></div>${html}</div>`;
@@ -712,66 +663,49 @@ function renderStats() {
   // référence = moyenne de la 1re semaine de pesées (pas une valeur saisie à la main)
   const startRef = ws.length ? avg(ws.filter(([d]) => diff(ws[0][0], d) < 7).map(x => x[1])) : null;
   const sinceStart = ws.length >= 2 && diff(ws[0][0], ws[ws.length - 1][0]) >= 7 ? cur7 - startRef : null;
-  const waists = sortedDates(S.weekly).filter(d => S.weekly[d].waist).map(d => [d, S.weekly[d].waist]);
-  const bfs = bfSeries();
   const rangeStart = S.range ? addDays(T, -S.range) : null;
   const inR = d => !rangeStart || d >= rangeStart;
   const xMin = S.range ? dn(rangeStart) : undefined, xMax = dn(T);
   const dayN = diff(s.startDate, T) + 1;
   const loss = r != null ? -r : null;
+  const sl7 = []; for (let i = 0; i < 7; i++) { const x = S.days[addDays(T, -i)]; const du = x && sleepDur(x.bed, x.wake); if (du) sl7.push(du); }
+  const ses28 = sortedDates(S.days).filter(d => diff(d, T) < 28 && S.days[d].session).length;
 
   v.innerHTML = `
   <div class="lt">Stats</div>
-  <div class="subt">Jour ${Math.max(dayN, 0)} · ${ws.length} pesée${ws.length > 1 ? 's' : ''} · ${Object.keys(S.days).length} jours suivis</div>
-  <div class="seg" id="rangeSeg">${[[30, '1 mois'], [90, '3 mois'], [0, 'Tout']].map(([n, l]) => `<button data-r="${n}" class="${S.range === n ? 'on' : ''}">${l}</button>`).join('')}</div>
+  <div class="seg" id="rangeSeg" style="margin-top:10px">${[[30, '1 mois'], [90, '3 mois'], [0, 'Tout']].map(([n, l]) => `<button data-r="${n}" class="${S.range === n ? 'on' : ''}">${l}</button>`).join('')}</div>
 
   <div class="grid2">
-    <div class="card tile"><div class="k">Poids (moy. 7 j)</div><div class="v num">${fmt(cur7)}<small>kg</small></div><div class="d ${cls(sinceStart)}">${sinceStart != null ? sgn(sinceStart) + ' kg depuis le début' : ws.length ? 'référence en cours (1re sem.)' : 'pèse-toi 🙂'}</div></div>
-    <div class="card tile"><div class="k">Rythme</div><div class="v num">${r != null ? sgn(r, 2) : '–'}<small>kg/sem</small></div><div class="d" style="color:${rateColor(loss)}">${loss == null ? 'besoin de ~1 sem.' : loss < s.rateMin ? 'trop lent' : loss > s.rateMax + .1 ? 'trop rapide' : 'dans la cible ✓'}</div></div>
-    <div class="card tile"><div class="k">Tour de taille</div><div class="v num">${waists.length ? fmt(waists[waists.length - 1][1]) : '–'}<small>cm</small></div><div class="d ${cls(waists.length > 1 ? waists[waists.length - 1][1] - waists[0][1] : null)}">${waists.length > 1 ? sgn(waists[waists.length - 1][1] - waists[0][1]) + ' cm' : 'check-in hebdo'}</div></div>
-    <div class="card tile"><div class="k">Masse grasse (est.)</div><div class="v num">${bfs.length ? fmt(bfs[bfs.length - 1].bf) : '–'}<small>%</small></div><div class="d ${cls(bfs.length > 1 ? bfs[bfs.length - 1].bf - bfs[0].bf : null)}">${bfs.length > 1 ? sgn(bfs[bfs.length - 1].bf - bfs[0].bf) + ' pt' : bfs.length ? 'méthode Navy' : 'taille + cou'}</div></div>
+    <div class="card tile"><div class="k">Poids</div><div class="v num">${fmt(cur7)}<small>kg</small></div><div class="d ${cls(sinceStart)}">${sinceStart != null ? sgn(sinceStart) + ' kg' : ''}</div></div>
+    <div class="card tile"><div class="k">Rythme</div><div class="v num">${r != null ? sgn(r, 2) : '–'}<small>/sem</small></div><div class="d" style="color:${rateColor(loss)}">${loss == null ? '' : loss < s.rateMin ? 'lent' : loss > s.rateMax + .1 ? 'rapide' : 'parfait'}</div></div>
+    <div class="card tile"><div class="k">Sommeil</div><div class="v num">${durT(avg(sl7))}</div><div class="d muted">moy. 7 j</div></div>
+    <div class="card tile"><div class="k">Séances</div><div class="v num">${fmt(ses28 / 4, 1)}<small>/sem</small></div><div class="d muted">4 dernières sem.</div></div>
   </div>
   <div style="height:12px"></div>
-  ${coachCard(r, dayN, waists)}
+  ${coachCard(r, dayN, [])}
 
   <div class="sh">Poids <small>${projection(cur7, r)}</small></div>
-  <div class="card"><div class="chart" id="cWeight"></div>
-    <div class="legend"><span><i style="background:var(--accent)"></i>Moyenne 7 j</span><span><i style="background:var(--accent);opacity:.4;border-radius:5px"></i>Pesées</span><span><i style="background:var(--green);opacity:.4"></i>Trajectoire cible</span></div></div>
-
-  <div class="sh">Composition <small>estimation</small></div>
-  <div class="card"><div class="chart" id="cComp"></div>
-    <div class="legend"><span><i style="background:var(--teal)"></i>Masse maigre</span><span><i style="background:var(--orange)"></i>Masse grasse</span><span>kg gagnés / perdus depuis le 1er check-in</span></div>
-    ${bfs.length > 1 ? `<div class="small muted" style="margin-top:8px">${compText(bfs)}</div>` : ''}</div>
-
-  <div class="sh">Tour de taille</div>
-  <div class="card"><div class="chart" id="cWaist"></div></div>
+  <div class="card"><div class="chart" id="cWeight"></div></div>
 
   ${st().showProt ? `<div class="sh">Protéines</div>${protCard()}` : ''}
 
   <div class="sh">Sommeil</div>
   ${sleepCard()}
 
-  <div class="sh">Perfs</div>
-  ${s.exercises.map((e, i) => perfCard(e, i)).join('')}
-
   <div class="sh">Régularité</div>
   <div class="card">${heatmap()}</div>
-  ${sessionsCard()}
 
-  <div class="sh">Insights</div>
-  <div class="card">${insights()}</div>
+  ${insightsHtml()}
 
-  <div class="sh">Journal <small>tape pour modifier</small></div>
+  <div class="sh">Journal</div>
   <div class="card">${journal()}</div>
-  ${Object.keys(S.weekly).length ? `<div class="sh">Check-ins hebdo</div><div class="card">${sortedDates(S.weekly).reverse().map(d => { const w = S.weekly[d]; return `<div class="jrow" data-wk="${d}"><div class="dt">${dShort(d)}</div><div class="bd">${w.waist ? `<b>${fmt(w.waist)} cm</b> · ` : ''}${(w.perfs || []).map(p => `${esc(p.n)} ${p.load ? fmt(p.load, 1).replace(',0', '') + '×' : ''}${p.reps}`).join(' · ')}</div><span class="chev">›</span></div>`; }).join('')}</div>` : ''}
-  <button class="btn sec" style="margin-top:12px" id="addWeek">+ Nouveau check-in</button>
   `;
 
   // charts
   const target = [];
   if (startRef != null) { const st0 = dn(ws[0][0]), tw = x => startRef - (s.rateMin + s.rateMax) / 2 * (x - st0) / 7; for (let x = Math.max(st0, xMin ?? st0); x <= xMax; x += 7) target.push([x, tw(x)]); target.push([xMax, tw(xMax)]); }
   chart($('#cWeight'), {
-    height: 200, xMin, xMax, empty: 'Ajoute ta première pesée dans « Aujourd\'hui »',
+    height: 200, xMin, xMax, empty: 'Pas encore de pesée',
     series: [
       { data: av.filter(([d]) => inR(d)).map(([d, y]) => [dn(d), y]), color: 'var(--accent)', area: true, endDot: true, width: 3 },
       { data: ws.filter(([d]) => inR(d)).map(([d, y]) => [dn(d), y]), color: 'var(--accent)', type: 'dots', r: 3.2, op: .45 },
@@ -779,44 +713,32 @@ function renderStats() {
     ],
     tipFmt: (x, y) => { const d = fromDn(x), raw = S.days[d]?.weight; return `${dShort(d)} · moy ${fmt(y)}${raw != null ? ` · pesée ${fmt(raw)}${S.days[d].weight_pm ? ' 🌙' : ''}` : ''}`; }
   });
-  chart($('#cComp'), { height: 170, empty: 'Fais un check-in avec tour de taille + cou<br>pour voir masse grasse / maigre', series: [
-    { data: bfs.filter(b => b.lean != null).map(b => [dn(b.d), b.lean - bfs[0].lean]), color: 'var(--teal)', dotsAll: true },
-    { data: bfs.filter(b => b.fat != null).map(b => [dn(b.d), b.fat - bfs[0].fat]), color: 'var(--orange)', dotsAll: true }
-  ], extraY: [0], yFmt: v => sgn(v, 1), tipFmt: (x) => { const b = bfs.find(q => dn(q.d) === x); return b ? `${dShort(b.d)} · ${fmt(b.bf)} % · maigre ${fmt(b.lean)} kg` : ''; } });
-  chart($('#cWaist'), { height: 150, empty: 'Mesure ton tour de taille au check-in hebdo', series: [{ data: waists.map(([d, y]) => [dn(d), y]), color: 'var(--purple)', area: true, dotsAll: true }] });
   const pd14 = []; for (let i = 13; i >= 0; i--) { const d = addDays(T, -i); pd14.push([dn(d), S.days[d]?.protein ?? 0]); }
   if ($('#cProt')) chart($('#cProt'), { height: 140, xMin: dn(addDays(T, -13)) - .5, xMax: dn(T) + .5, yMin: 0, extraY: [s.protMax + 10], band: [s.protMin, s.protMax], yFmt: v => fmt(v, 0), series: [{ type: 'bar', data: pd14, color: y => y >= s.protMin ? 'var(--green)' : y > 0 ? 'var(--accent)' : 'var(--card2)' }], tipFmt: (x, y) => `${dShort(fromDn(x))} · ${y} g` });
   const sl = sortedDates(S.days).filter(d => inR(d) && S.days[d].bed).map(d => [dn(d), tMin(S.days[d].bed)]);
   const tg = []; { const a = Math.max(dn(s.startDate), xMin ?? dn(s.startDate)); for (let x = a; x <= xMax + 1; x++) tg.push([x, bedTarget(fromDn(x))]); }
-  chart($('#cSleep'), { height: 170, xMin, xMax, minPad: 20, yFmt: v => minT(v), empty: 'Note ton coucher / réveil pour voir ta courbe', series: [
+  chart($('#cSleep'), { height: 170, xMin, xMax, minPad: 20, yFmt: v => minT(v), empty: 'Pas encore de nuit', series: [
     { data: sl, color: 'var(--indigo)', dotsAll: true, width: 2.5 },
     { data: tg, color: 'var(--green)', type: 'step', width: 1.5, dash: '4 4', op: .8 }
   ], tipFmt: (x, y) => `${dShort(fromDn(x))} · couché ${minT(y)} · cible ${minT(bedTarget(fromDn(x)))}` });
-  s.exercises.forEach((e, i) => { const pts = perfPts(e); chart($('#cPerf' + i), { height: 120, minPad: 2, yFmt: v => fmt(v, 0), empty: 'Pas encore de perf notée', series: [{ data: pts.map(p => [dn(p.d), p.m]), color: 'var(--pink)', dotsAll: true, area: true }], tipFmt: x => { const p = pts.find(q => dn(q.d) === x); return p ? `${dShort(p.d)} · ${p.load ? fmt(p.load, 1).replace(',0', '') + ' kg × ' : ''}${p.reps}` : ''; } }); });
 
   $$('#rangeSeg button').forEach(b => b.onclick = () => { S.range = +b.dataset.r; renderStats(); });
+  if ($('#jAll')) $('#jAll').onclick = () => { S.jAll = true; renderStats(); };
   $$('[data-j]').forEach(el => el.onclick = () => { S.cur = el.dataset.j; S.dateLocked = S.cur !== today(); go('today'); });
-  $$('[data-wk]').forEach(el => el.onclick = () => openWeekly(el.dataset.wk));
-  $('#addWeek').onclick = () => openWeekly(today());
 }
 const cls = d => d == null || isNaN(d) ? 'flat' : d < -0.05 ? 'down' : d > 0.05 ? 'up' : 'flat';
 function rateColor(loss) { const s = st(); if (loss == null) return 'var(--sub)'; if (loss < s.rateMin) return 'var(--orange)'; if (loss > s.rateMax + .1) return 'var(--red)'; return 'var(--green)'; }
 function projection(cur, r) { if (cur == null || r == null) return ''; return `à ce rythme : ${fmt(cur + r * 4)} kg dans 4 sem.`; }
-function coachCard(r, dayN, waists) {
-  const s = st(); let ic = '🧭', col = 'var(--accent)', t, p;
+function coachCard(r, dayN) {
+  const s = st(); let ic = '⏳', col = 'var(--accent)', t, p = '';
   const loss = r != null ? -r : null;
-  const wTrend = waists.length > 1 ? waists[waists.length - 1][1] - waists[Math.max(0, waists.length - 4)][1] : null;
-  if (loss == null) { t = 'Calibrage en cours'; p = 'Pèse-toi 3 fois par semaine (le matin, à jeun). Après ~1 semaine je calcule ton rythme, et après 3 semaines je te donne des conseils.'; }
-  else if (dayN < 21) { t = `Calibrage · jour ${dayN}/21`; p = `Rythme actuel ${sgn(r, 2)} kg/sem. Les 2–3 premières semaines bougent beaucoup (eau, glycogène) : on ajuste à partir du jour 21.`; ic = '⏳'; }
-  else if (loss < s.rateMin) {
-    if (wTrend != null && wTrend <= -0.5) { t = 'Le poids stagne, mais la taille baisse 👀'; p = `Ton tour de taille a pris ${sgn(wTrend)} cm récemment : c'est probablement de la recompo (gras ↓, muscle ↑). Tu peux garder le cap encore 1–2 semaines.`; ic = '🧬'; col = 'var(--teal)'; }
-    else { t = 'Un peu trop lent'; p = `${sgn(r, 2)} kg/sem pour une cible de −${fmt(s.rateMin, 2)} à −${fmt(s.rateMax, 2)}. Réduis un peu les féculents du soir (≈ ⅓ de portion en moins, ~100–150 kcal) et garde tes protéines.`; ic = '🐢'; col = 'var(--orange)'; }
-  }
-  else if (loss > s.rateMax + .1) { t = 'Trop rapide'; p = `${sgn(r, 2)} kg/sem : tu risques de perdre du muscle. Mange un peu plus (~150–200 kcal : un skyr + une banane, ou une portion de féculents en plus).`; ic = '⚡️'; col = 'var(--red)'; }
-  else { t = 'Parfait, tu es dans la cible'; p = `${sgn(r, 2)} kg/sem. Ne change rien : protéines, séances, sommeil.`; ic = '✅'; col = 'var(--green)'; }
-  return `<div class="card"><div class="coach"><div class="ic" style="background:color-mix(in srgb,${col} 25%,transparent)">${ic}</div><div><b>${t}</b><p>${p}</p></div></div></div>`;
+  if (loss == null) { t = 'Pèse-toi 3× par semaine'; }
+  else if (dayN < 21) { t = `Calibrage · jour ${dayN}/21`; p = 'Les premières semaines bougent beaucoup (eau).'; }
+  else if (loss < s.rateMin) { t = 'Un peu lent'; p = 'Réduis un peu les féculents du soir.'; ic = '🐢'; col = 'var(--orange)'; }
+  else if (loss > s.rateMax + .1) { t = 'Trop rapide'; p = 'Mange un peu plus (+150 kcal) pour garder ton muscle.'; ic = '⚡️'; col = 'var(--red)'; }
+  else { t = 'Dans la cible'; p = 'Ne change rien.'; ic = '✅'; col = 'var(--green)'; }
+  return `<div class="card"><div class="coach"><div class="ic" style="background:color-mix(in srgb,${col} 25%,transparent)">${ic}</div><div><b>${t}</b>${p ? `<p>${p}</p>` : ''}</div></div></div>`;
 }
-function compText(b) { const a = b[0], z = b[b.length - 1]; if (a.lean == null || z.lean == null) return ''; const dl = z.lean - a.lean, df = z.fat - a.fat; return `Depuis le ${dShort(a.d)} : masse grasse ${sgn(df)} kg, masse maigre ${sgn(dl)} kg. ${df < 0 && dl >= -0.3 ? 'Recompo réussie jusque-là 🔥' : ''}`; }
 function protCard() {
   const s = st(), T = today(), p = day(T).protein || 0;
   const last7 = []; for (let i = 0; i < 7; i++) { const d = S.days[addDays(T, -i)]; if (d && d.protein) last7.push(d.protein); }
@@ -830,85 +752,45 @@ function protCard() {
     <div class="chart" id="cProt" style="margin-top:14px"></div></div>`;
 }
 function sleepCard() {
-  const T = today(), s = st(); const ds = []; for (let i = 0; i < 7; i++) { const d = S.days[addDays(T, -i)]; if (d && d.bed) ds.push({ dur: sleepDur(d.bed, d.wake), bed: tMin(d.bed), tgt: bedTarget(addDays(T, -i)) }); }
-  const ad = avg(ds.map(x => x.dur).filter(Boolean)), ab = avg(ds.map(x => x.bed)), hit = ds.filter(x => x.bed <= x.tgt + 10).length;
+  const T = today(), s = st(); const ds = []; for (let i = 0; i < 7; i++) { const d = S.days[addDays(T, -i)]; if (d && d.bed) ds.push({ bed: tMin(d.bed), tgt: bedTarget(addDays(T, -i)) }); }
+  const ab = avg(ds.map(x => x.bed)), hit = ds.filter(x => x.bed <= x.tgt + 10).length;
   return `<div class="card">
-    <div class="grid2" style="gap:8px;margin-bottom:12px">
-      <div><div class="muted small">Coucher moyen (7 j)</div><div class="bigv num" style="font-size:26px">${ab ? minT(ab) : '–'}</div></div>
-      <div><div class="muted small">Sommeil moyen</div><div class="bigv num" style="font-size:26px;color:${ad >= 7.5 * 60 ? 'var(--green)' : 'var(--text)'}">${durT(ad)}</div></div>
-    </div>
-    <div class="small muted" style="margin-bottom:10px">🎯 Cible ce soir <b style="color:var(--text)">${minT(bedTarget(addDays(T, 1)))}</b> → objectif final ${minT(tMin(s.bedGoal))} (${s.bedStepMin} min plus tôt tous les ${s.bedStepDays} jours)${ds.length ? ` · ${hit}/${ds.length} nuits dans la cible` : ''}</div>
+    <div class="row between" style="margin-bottom:10px"><div><div class="muted small">Coucher moyen</div><div class="bigv num" style="font-size:26px">${ab ? minT(ab) : '–'}</div></div>
+    <div style="text-align:right"><div class="muted small">Cible ce soir</div><div class="bigv num" style="font-size:26px;color:var(--green)">${minT(bedTarget(addDays(T, 1)))}</div></div></div>
     <div class="chart" id="cSleep"></div>
-    <div class="legend"><span><i style="background:var(--indigo)"></i>Heure de coucher</span><span><i style="background:var(--green)"></i>Cible progressive</span></div></div>`;
-}
-function perfPts(e) {
-  const o = {};
-  sortedDates(S.weekly).forEach(d => { const p = (S.weekly[d].perfs || []).find(x => x.n === e.n); const m = perfMetric(p, e.t); if (m != null) o[d] = { d, m, load: p.load, reps: p.reps }; });
-  // + meilleures séries notées dans les séances (toutes variantes de l'exo)
-  workoutDays().forEach(d => S.days[d].workout.ex.filter(x => x.n === e.n).forEach(x => (x.sets || []).forEach(q => { const p = { load: q.kg, reps: q.r }, m = perfMetric(p, e.t); if (m != null && (!o[d] || m > o[d].m)) o[d] = { d, m, load: q.kg, reps: q.r }; })));
-  return Object.values(o).sort((a, b) => a.d < b.d ? -1 : 1);
-}
-function perfCard(e, i) {
-  const pts = perfPts(e), last = pts[pts.length - 1], first = pts[0];
-  const gain = pts.length > 1 ? (last.m - first.m) / first.m * 100 : null;
-  const best = pts.length ? pts.reduce((a, b) => b.m > a.m ? b : a) : null;
-  return `<div class="card"><h3>${esc(e.n)} <span class="r ${gain > 0 ? 'down' : gain < 0 ? 'up' : 'muted'}">${gain != null ? sgn(gain, 0) + ' %' : ''}</span></h3>
-    <div class="row between" style="margin-bottom:8px"><div class="bigv num" style="font-size:26px">${last ? (last.load ? fmt(last.load, 1).replace(',0', '') + '<small> kg</small> × ' : '') + last.reps + '<small> reps</small>' : '–'}</div>
-    <div class="small muted" style="text-align:right">${e.t === 'charge' ? `1RM estimé<br><b style="color:var(--text)">${last ? fmt(last.m, 1) + ' kg' : '–'}</b>` : best ? `Record<br><b style="color:var(--text)">${best.reps} reps</b>` : ''}</div></div>
-    <div class="chart" id="cPerf${i}"></div></div>`;
+    ${ds.length ? `<div class="small muted" style="margin-top:6px">${hit}/${ds.length} nuits dans la cible</div>` : ''}</div>`;
 }
 function heatmap() {
   const T = today(), weeks = 16; const t = pd(T); const end = addDays(T, 6 - ((t.getDay() + 6) % 7)); const start = addDays(end, -(weeks * 7) + 1);
   let h = '', n = 0, clean = 0;
-  for (let i = 0; i < weeks * 7; i++) { const d = addDays(start, i), x = S.days[d]; const fut = d > T; if (x) { n++; if (x.rating === 1) clean++; } h += `<div class="${fut ? 'fut' : ''} ${x ? (x.rating ? 'r' + x.rating : 'r0') : ''} ${x?.session ? 's' : ''}" title="${d}"></div>`; }
-  return `<div class="row between" style="margin-bottom:10px"><div><div class="muted small">16 dernières semaines</div><b>${n} jours suivis${st().showRating ? ` · ${clean} 🟢` : ''}</b></div><div class="small muted" style="text-align:right">Lun → Dim ↓</div></div>
+  for (let i = 0; i < weeks * 7; i++) { const d = addDays(start, i), x = S.days[d]; const fut = d > T; if (x) { n++; if (x.rating === 1) clean++; } h += `<div class="${fut ? 'fut' : ''} ${x ? (x.rating && st().showRating ? 'r' + x.rating : 'r0') : ''} ${x?.session ? 's' : ''}" title="${d}"></div>`; }
+  return `<div class="small muted" style="margin-bottom:10px">${n} jours suivis</div>
   <div class="heat" style="grid-template-columns:repeat(${weeks},1fr)">${h}</div>
-  <div class="legend">${st().showRating ? `<span><i style="background:var(--green)"></i>Clean</span><span><i style="background:var(--yellow)"></i>Correct</span><span><i style="background:var(--red)"></i>Écart</span>` : `<span><i style="background:color-mix(in srgb,var(--accent) 45%,var(--card2))"></i>Jour suivi</span>`}<span><i style="box-shadow:inset 0 0 0 2px var(--text)"></i>Séance</span></div>`;
+  <div class="legend"><span><i style="box-shadow:inset 0 0 0 2px var(--text)"></i>Séance</span></div>`;
 }
-function sessionsCard() {
-  const s = st(), cnt = {}; s.sessions.forEach(x => cnt[x] = 0);
-  const ds = sortedDates(S.days).filter(d => S.days[d].session); ds.forEach(d => { cnt[S.days[d].session] = (cnt[S.days[d].session] || 0) + 1; });
-  const max = Math.max(1, ...Object.values(cnt));
-  const wk = ds.length ? ds.length / Math.max(1, (diff(ds[0], today()) + 1) / 7) : 0;
-  return `<div class="card"><h3>Séances <span class="r muted">${ds.length} au total · ${fmt(wk, 1)}/sem.</span></h3>
-  <div class="bars">${Object.entries(cnt).map(([k, v]) => `<div class="b"><span>${esc(k)}</span><div style="width:${v / max * 70}%"></div><b class="small">${v}</b></div>`).join('')}</div>
-  <div class="small muted" style="margin-top:6px">Cible : 1 jour sur 2 ≈ 3,5 séances / semaine</div></div>`;
-}
-function insights() {
-  const out = [], s = st(), D = S.days, dates = sortedDates(D);
-  // semaines clean vs autres
-  const weeks = {}; dates.forEach(d => { const t = pd(d); const mon = addDays(d, -((t.getDay() + 6) % 7)); (weeks[mon] = weeks[mon] || []).push(d); });
-  const wk = Object.keys(weeks).sort().map(m => { const a = avg7At(addDays(m, 6)), b = avg7At(addDays(m, -1)); const cl = weeks[m].filter(d => D[d].rating === 1).length; const rated = weeks[m].filter(d => D[d].rating).length; return a != null && b != null && rated >= 4 ? { ch: a - b, good: cl / rated >= .7 } : null; }).filter(Boolean);
-  const g = wk.filter(w => w.good), b = wk.filter(w => !w.good);
-  if (g.length && b.length) out.push(['🥗', `Semaines majoritairement 🟢 : <b>${sgn(avg(g.map(w => w.ch)), 2)} kg</b>/sem <span>vs ${sgn(avg(b.map(w => w.ch)), 2)} les autres.</span>`]);
-  // sommeil -> journée clean le lendemain
-  const sl = dates.filter(d => D[d].rating && sleepDur(D[d].bed, D[d].wake));
-  const sGood = sl.filter(d => sleepDur(D[d].bed, D[d].wake) >= 7 * 60), sBad = sl.filter(d => sleepDur(D[d].bed, D[d].wake) < 7 * 60);
-  if (sGood.length >= 3 && sBad.length >= 3) { const pc = a => Math.round(a.filter(d => D[d].rating === 1).length / a.length * 100); out.push(['😴', `Après une nuit ≥ 7 h, <b>${pc(sGood)} %</b> de journées 🟢 <span>vs ${pc(sBad)} % après une nuit courte.</span>`]); }
-  // protéines jours séance vs repos
-  const ps = dates.filter(d => D[d].protein && D[d].session).map(d => D[d].protein), pr = dates.filter(d => D[d].protein && !D[d].session).map(d => D[d].protein);
-  if (ps.length >= 3 && pr.length >= 3) out.push(['💪', `Protéines les jours de séance : <b>${Math.round(avg(ps))} g</b> <span>vs ${Math.round(avg(pr))} g les jours off.</span>`]);
-  // pas
+function insightsHtml() {
+  const out = [], D = S.days, dates = sortedDates(D);
   const st7 = dates.filter(d => D[d].steps).map(d => D[d].steps);
-  if (st7.length >= 5) out.push(['👟', `<b>${Math.round(avg(st7)).toLocaleString('fr-FR')}</b> pas en moyenne <span>· ${st7.filter(x => x >= 10000).length}/${st7.length} jours ≥ 10 000.</span>`]);
-  // pesées
-  const ws = weights(); if (ws.length >= 4) { const mn = ws.reduce((a, b) => b[1] < a[1] ? b : a); out.push(['⚖️', `Plus bas : <b>${fmt(mn[1])} kg</b> le ${dShort(mn[0])} <span>· variation jour à jour moyenne ±${fmt(avg(ws.slice(1).map((w, i) => Math.abs(w[1] - ws[i][1]))), 1)} kg (eau).</span>`]); }
-  // perfs
-  s.exercises.forEach(e => { const p = perfPts(e); if (p.length >= 2) { const g = (p[p.length - 1].m - p[0].m) / p[0].m * 100; out.push(['📈', `${esc(e.n)} : <b>${sgn(g, 0)} %</b> <span>depuis le ${dShort(p[0].d)}${g >= 0 && rate() != null && rate() < 0 ? ' — en perdant du poids, c\'est le signe que tu gardes ton muscle' : ''}.</span>`]); } });
-  // meilleur jour pour se peser
-  if (!out.length) return `<div class="muted small">Les insights apparaissent après ~2 semaines de données : ils croisent bouffe, sommeil, séances et poids pour te montrer ce qui marche vraiment pour toi.</div>`;
-  return out.map(([e, t]) => `<div class="insight"><div class="e">${e}</div><p>${t}</p></div>`).join('');
+  if (st7.length >= 5) out.push(['👟', `<b>${Math.round(avg(st7)).toLocaleString('fr-FR')}</b> pas / jour`]);
+  const ws = weights(); if (ws.length >= 4) { const mn = ws.reduce((a, b) => b[1] < a[1] ? b : a); out.push(['⚖️', `Plus bas <b>${fmt(mn[1])} kg</b> <span>· ${dShort(mn[0])}</span>`]); }
+  const ps = dates.filter(d => D[d].protein).map(d => D[d].protein); if (st().showProt && ps.length >= 3) out.push(['🥩', `<b>${Math.round(avg(ps))} g</b> de protéines / jour`]);
+  // exos qui progressent le plus
+  const keys = {}; workoutDays().forEach(d => D[d].workout.ex.forEach(x => keys[exKey(x)] = 1));
+  Object.keys(keys).map(k => { const h = exHistory(k); return h.length >= 2 ? [k, (h[h.length - 1].best.m - h[0].best.m) / h[0].best.m * 100] : null; }).filter(Boolean).sort((a, b) => b[1] - a[1]).slice(0, 3)
+    .forEach(([k, g]) => out.push(['📈', `${esc(k)} <b>${sgn(g, 0)} %</b>`]));
+  if (!out.length) return '';
+  return `<div class="sh">Insights</div><div class="card">${out.map(([e, t]) => `<div class="insight"><div class="e">${e}</div><p>${t}</p></div>`).join('')}</div>`;
 }
 function journal() {
-  const ds = sortedDates(S.days).reverse().slice(0, 30);
-  if (!ds.length) return `<div class="muted small">Rien pour l'instant.</div>`;
+  const all = sortedDates(S.days).reverse(), ds = all.slice(0, S.jAll ? 120 : 7);
+  if (!ds.length) return `<div class="muted small">–</div>`;
   return ds.map(d => { const x = S.days[d], dur = sleepDur(x.bed, x.wake); const parts = [];
     if (x.weight != null) parts.push(`<b>${fmt(x.weight)} kg</b>`);
-    if (x.protein) parts.push(`${x.protein} g prot.`);
+    if (x.protein && st().showProt) parts.push(`${x.protein} g prot.`);
     if (x.session) parts.push(`🏋️ ${esc(x.session)}`);
     if (dur) parts.push(`😴 ${durT(dur)}`);
     if (x.steps) parts.push(`👟 ${(x.steps / 1000).toLocaleString('fr-FR', { maximumFractionDigits: 1 })}k`);
-    return `<div class="jrow" data-j="${d}"><div class="dt">${dShort(d)}<small>${JOURS[pd(d).getDay()].slice(0, 3)}.</small></div><div class="bd">${x.rating ? `<span class="dot" style="background:${RATING[x.rating].c}"></span>` : ''}${parts.join(' · ') || '—'}</div><span class="chev">›</span></div>`; }).join('');
+    return `<div class="jrow" data-j="${d}"><div class="dt">${dShort(d)}<small>${JOURS[pd(d).getDay()].slice(0, 3)}.</small></div><div class="bd">${x.rating && st().showRating ? `<span class="dot" style="background:${RATING[x.rating].c}"></span>` : ''}${parts.join(' · ') || '—'}</div><span class="chev">›</span></div>`; }).join('') + (all.length > ds.length ? `<button class="link small" id="jAll" style="margin-top:8px">Tout voir</button>` : '');
 }
 
 /* ================= Vue : Photos ================= */
@@ -921,13 +803,13 @@ async function renderPhotos() {
   const v = $('#v-photos'), ph = [...S.photos].sort((a, b) => a.date < b.date ? 1 : -1);
   v.innerHTML = `
   <div class="row between"><div class="lt">Photos</div><button class="chip on" id="addPh" style="padding:9px 16px">+ Ajouter</button></div>
-  <div class="subt">${ph.length ? `${ph.length} photo${ph.length > 1 ? 's' : ''} · depuis le ${dShort(ph[ph.length - 1].date)}` : 'Quand tu veux, même lumière, même endroit si possible.'}</div>
-  ${ph.length >= 2 ? `<div class="card"><h3>Avant / après <span class="r muted">glisse ↔</span></h3>
+  <div class="subt">${ph.length ? `${ph.length} photo${ph.length > 1 ? 's' : ''}` : ''}</div>
+  ${ph.length >= 2 ? `<div class="card"><h3>Avant / après</h3>
     <div class="row" style="gap:8px;margin-bottom:10px"><select class="tinput" id="cmpA">${ph.map((p, i) => `<option value="${i}" ${i === ph.length - 1 ? 'selected' : ''}>${dShort(p.date)}</option>`).join('')}</select><select class="tinput" id="cmpB">${ph.map((p, i) => `<option value="${i}" ${i === 0 ? 'selected' : ''}>${dShort(p.date)}</option>`).join('')}</select></div>
     <div class="cmp" id="cmp"><img id="cmpIA"><img id="cmpIB" class="top"><div class="hand"></div><span class="lb" style="left:10px" id="cmpLA"></span><span class="lb" style="right:10px" id="cmpLB"></span></div></div>` : ''}
   ${ph.length ? `<div class="pgrid">${ph.map((p, i) => `<div class="ph" data-ph="${i}"><img data-path="${esc(p.path)}" loading="lazy"><span>${dShort(p.date)}</span></div>`).join('')}</div>`
-    : `<div class="card" style="text-align:center;padding:36px 16px"><div style="font-size:44px">📸</div><b>Ta première photo</b><p class="muted small">Face, profil, dos — ou juste un miroir. Dans 6 semaines tu seras content de l'avoir.</p><button class="btn" id="addPh2" style="margin-top:12px">Ajouter une photo</button></div>`}
-  <div class="small muted" style="margin-top:12px;text-align:center">🔒 Tes photos sont privées : seul ton compte peut les voir.</div>`;
+    : `<div class="card" style="text-align:center;padding:36px 16px"><div style="font-size:44px">📸</div><button class="btn" id="addPh2" style="margin-top:12px">Ajouter une photo</button></div>`}
+`;
   const add = () => $('#photoInput').click();
   $('#addPh').onclick = add; if ($('#addPh2')) $('#addPh2').onclick = add;
   if (!ph.length) return;
@@ -1034,11 +916,10 @@ function renderSettings() {
   <div class="ghd">Apparence</div>
   <div class="seg" id="themeSeg" style="margin:0 0 4px">${[['dark', 'Sombre'], ['light', 'Clair'], ['auto', 'Auto']].map(([k, l]) => `<button data-t="${k}" class="${s.theme === k ? 'on' : ''}">${l}</button>`).join('')}</div>
 
-  <div class="ghd">Raccourci iPhone · pas + sommeil automatiques</div>
+  <div class="ghd">Pas & sommeil automatiques</div>
   <div class="card">
     ${S.healthToken ? `
-    <p class="small" style="margin-top:0">Chaque soir à 23:30, ton iPhone envoie tout seul tes <b>pas du jour</b> et ta <b>nuit dernière</b> (app Santé). À faire une seule fois, ~5 min, dans l'app <b>Raccourcis</b>.</p>
-    <div class="muted small">Les 3 valeurs à copier-coller :</div>
+    <details class="cue" style="margin-top:0"><summary>Guide du raccourci iPhone</summary>
     ${[['URL', SB_URL + '/rest/v1/rpc/log_health'], ['apikey', SB_KEY], ['Jeton', S.healthToken]].map(([l, v]) => `<div class="row" style="margin:6px 0"><span class="small" style="width:52px;flex:none">${l}</span><code class="code" style="flex:1;padding:7px">${esc(v)}</code><button class="link small" data-copy="${esc(v)}">Copier</button></div>`).join('')}
     <ol class="steps small">
       <li><b>Automatisation</b> → <b>+</b> → <b>Heure de la journée</b> → <b>23:30</b>, <b>Quotidiennement</b> → coche <b>Exécuter immédiatement</b> → Suivant → <b>Nouveau raccourci vide</b>.</li>
@@ -1050,64 +931,53 @@ function renderSettings() {
         <code>p_token</code> Texte = ton jeton<br><code>p_date</code> Texte = la date formatée (étape 5)<br><code>p_steps</code> Nombre = le nombre arrondi (étape 2)<br><code>p_bed</code> Texte = la date formatée de l'étape 3<br><code>p_wake</code> Texte = la date formatée de l'étape 4</li>
       <li>Appuie sur ▶︎ en bas pour tester : ça doit afficher <code>"ok"</code>, et tes pas apparaissent dans l'app.</li>
     </ol>
-    <p class="small muted">😴 Pour le sommeil sans montre : app <b>Santé</b> → <b>Sommeil</b> → active un <b>horaire de sommeil</b> (coucher minuit, réveil 8h). L'iPhone note alors ton temps « au lit ». Si un jour rien n'est trouvé, l'app garde juste les pas.</p>
-    <button class="btn sec" id="testTok" style="margin-bottom:8px">Tester la connexion</button>
+    </details>
+    <button class="btn sec" id="testTok" style="margin:12px 0 8px">Tester la connexion</button>
     <button class="btn danger" id="newTok">Générer un nouveau jeton</button>`
-    : `<p class="small" style="margin-top:0">Ton iPhone peut envoyer tout seul tes pas et ton sommeil chaque soir (app Raccourcis, réglage une seule fois). Appuie sur Activer et suis le guide.</p><button class="btn" id="newTok">Activer</button>`}
+    : `<button class="btn" id="newTok">Activer</button>`}
   </div>
 
   <div class="ghd">Profil</div>
   <div class="glist">
-    ${gnum('height', 'Taille', 'cm')}${gnum('pmOffset', 'Écart pesée soir', 'kg')}
     <div class="gitem"><span>Début de la sèche</span><input type="date" data-k="startDate" value="${s.startDate}" style="width:150px"></div>
-    ${gnum('neck', 'Tour de cou', 'cm')}
+    ${pmOffset().auto ? `<div class="gitem"><span>Écart pesée soir</span><span class="muted">${fmt(pmOffset().v, 1)} kg · auto</span></div>` : gnum('pmOffset', 'Écart pesée soir', 'kg')}
   </div>
-  <div class="gft">Le tour de cou (mesuré sous la pomme d'Adam) + ton tour de taille = estimation du % de gras. Écart pesée soir : ce qu'on retire à une pesée du soir pour la comparer au matin${pmOffset().auto ? ` — calculé automatiquement sur tes pesées : <b>${fmt(pmOffset().v, 2)} kg</b>` : ' (calculé automatiquement dès 3 pesées matin + 3 soir)'}.</div>
 
   <div class="ghd">Objectifs</div>
   <div class="glist">
-    ${gnum('kcalMin', 'Calories min', 'kcal')}${gnum('kcalMax', 'Calories max', 'kcal')}${gnum('maint', 'Maintenance', 'kcal')}
-    ${gnum('protMin', 'Protéines min', 'g')}${gnum('protMax', 'Protéines max', 'g')}
     ${gnum('rateMin', 'Perte min / sem.', 'kg')}${gnum('rateMax', 'Perte max / sem.', 'kg')}
+    ${s.showProt ? gnum('protMin', 'Protéines', 'g') : ''}${s.showKcal ? gnum('kcalMin', 'Calories', 'kcal') : ''}
   </div>
 
   <div class="ghd">Sommeil</div>
   <div class="glist">
-    <div class="gitem"><span>Coucher au départ</span><input type="time" data-k="bedStart" value="${s.bedStart}"></div>
     <div class="gitem"><span>Coucher objectif</span><input type="time" data-k="bedGoal" value="${s.bedGoal}"></div>
     <div class="gitem"><span>Réveil objectif</span><input type="time" data-k="wakeGoal" value="${s.wakeGoal}"></div>
-    ${gnum('bedStepMin', 'Avancer de', 'min')}${gnum('bedStepDays', 'Tous les', 'jours')}
+    ${gnum('bedStepMin', 'Avancer de', 'min')}
   </div>
 
   ${s.showProt ? `<div class="ghd">Boutons protéines</div>
   <div class="glist" id="foodList">${s.foods.map((f, i) => `<div class="gitem"><button class="del" data-delf="${i}">⊖</button><input class="wide" data-fn="${i}" value="${esc(f.n)}"><input data-fg="${i}" inputmode="numeric" value="${f.g}" style="width:56px"><span class="muted">g</span></div>`).join('')}
     <div class="gitem"><button class="link" id="addFood">+ Ajouter un aliment</button></div></div>` : ''}
 
-  <div class="ghd">Exercices de référence</div>
-  <div class="glist">${s.exercises.map((e, i) => `<div class="gitem"><button class="del" data-dele="${i}">⊖</button><input class="wide" data-en="${i}" value="${esc(e.n)}"><select data-et="${i}" style="width:120px"><option value="charge" ${e.t === 'charge' ? 'selected' : ''}>Avec charge</option><option value="pdc" ${e.t === 'pdc' ? 'selected' : ''}>Poids du corps</option></select></div>`).join('')}
-    <div class="gitem"><button class="link" id="addEx">+ Ajouter un exercice</button></div></div>
-  <div class="gft">Renommer un exercice ne renomme pas l'historique déjà saisi.</div>
-
   <div class="ghd">Types de séance</div>
   <div class="glist"><div class="gitem"><input class="wide" id="sessIn" value="${esc(s.sessions.join(', '))}"></div></div>
-  <div class="gft">Séparés par des virgules.</div>
 
   <div class="ghd">Écran du jour</div>
   <div class="glist">
     <div class="gitem"><span>Afficher les pas</span><label class="switch"><input type="checkbox" data-b="showSteps" ${s.showSteps ? 'checked' : ''}><span></span></label></div>
-    <div class="gitem"><span>Évaluer ma journée (🟢🟡🔴)</span><label class="switch"><input type="checkbox" data-b="showRating" ${s.showRating ? 'checked' : ''}><span></span></label></div>
+    <div class="gitem"><span>Note repas 🟢🟡🔴</span><label class="switch"><input type="checkbox" data-b="showRating" ${s.showRating ? 'checked' : ''}><span></span></label></div>
     <div class="gitem"><span>Compter les protéines</span><label class="switch"><input type="checkbox" data-b="showProt" ${s.showProt ? 'checked' : ''}><span></span></label></div>
     <div class="gitem"><span>Afficher les calories</span><label class="switch"><input type="checkbox" data-b="showKcal" ${s.showKcal ? 'checked' : ''}><span></span></label></div>
   </div>
 
   <div class="ghd">Données</div>
   <div class="glist">
-    <div class="gitem"><button class="link" id="goGuide">Guide bouffe ›</button><span class="muted small">repères & équivalences</span></div>
-    <div class="gitem"><button class="link" id="exp">Exporter en JSON</button><span class="muted small">sauvegarde</span></div>
-    <div class="gitem"><button class="link" id="imp">Importer un JSON</button></div>
+    <div class="gitem"><button class="link" id="goGuide">Guide bouffe</button></div>
+    <div class="gitem"><button class="link" id="exp">Exporter</button></div>
+    <div class="gitem"><button class="link" id="imp">Importer</button></div>
     <div class="gitem"><button class="link" id="logout" style="color:var(--red)">Se déconnecter</button></div>
   </div>
-  <div class="gft">Tes données sont synchronisées dans ton espace Supabase privé. L'export ne contient pas les photos (elles restent en ligne).</div>
   <div style="height:20px"></div>`;
   bindSettings();
 }
@@ -1122,10 +992,6 @@ function bindSettings() {
   $$('[data-fg]').forEach(i => i.onchange = () => { s.foods[+i.dataset.fg].g = Math.round(num(i.value) || 0); saveSettings(); });
   $$('[data-delf]').forEach(b => b.onclick = () => { s.foods.splice(+b.dataset.delf, 1); saveSettings(); renderSettings(); });
   if ($('#addFood')) $('#addFood').onclick = () => { s.foods.push({ n: 'Nouvel aliment', g: 20 }); saveSettings(); renderSettings(); };
-  $$('[data-en]').forEach(i => i.onchange = () => { s.exercises[+i.dataset.en].n = i.value.trim() || 'Exercice'; saveSettings(); });
-  $$('[data-et]').forEach(i => i.onchange = () => { s.exercises[+i.dataset.et].t = i.value; saveSettings(); });
-  $$('[data-dele]').forEach(b => b.onclick = () => { if (confirm('Retirer cet exercice ? (l\'historique reste)')) { s.exercises.splice(+b.dataset.dele, 1); saveSettings(); renderSettings(); } });
-  $('#addEx').onclick = () => { s.exercises.push({ n: 'Muscle-up', t: 'pdc' }); saveSettings(); renderSettings(); };
   $('#sessIn').onchange = e => { const a = e.target.value.split(',').map(x => x.trim()).filter(Boolean); if (a.length) { s.sessions = a; saveSettings(); toast('Enregistré ✓'); } };
   $('#newTok').onclick = async () => { if (S.healthToken && !confirm('L\'ancien jeton ne marchera plus. Continuer ?')) return; const a = new Uint8Array(24); crypto.getRandomValues(a); const t = [...a].map(x => x.toString(16).padStart(2, '0')).join(''); await flush(); const { error } = await sb.from('settings').upsert({ user_id: S.user.id, data: S.settings, health_token: t }); if (error) { toast('Erreur : ' + error.message); return; } S.healthToken = t; renderSettings(); toast('Jeton créé ✓'); };
   $$('[data-copy]').forEach(bt => bt.onclick = () => { navigator.clipboard.writeText(bt.dataset.copy).then(() => toast('Copié ✓'), () => toast('Copie impossible : sélectionne le texte')); });
@@ -1328,7 +1194,7 @@ function openWorkout(date) {
     $('#wkBody', ov).innerHTML = `
       <div class="hd"><span></span><b>Séance · ${esc(dShort(date))}</b><button class="link" id="wkDone" style="font-weight:700">OK</button></div>
       <div class="row between small muted" style="margin:0 4px 12px"><span>${w.ex.length} exo${w.ex.length > 1 ? 's' : ''} · ${nSets} série${nSets > 1 ? 's' : ''}</span><span>${vol ? `${Math.round(vol).toLocaleString('fr-FR')} kg soulevés` : ''}</span></div>
-      ${!w.ex.length && prevDays.length ? `<div class="card"><h3>Refaire une séance</h3><div class="chips">${prevDays.map(d => `<button class="chip" data-copy-day="${d}">${esc(S.days[d].session || autoSession(S.days[d].workout) || 'Séance')} · ${dShort(d)}</button>`).join('')}</div><div class="small muted" style="margin-top:8px">Reprend les exos et tes charges de cette séance, tu ajustes ensuite.</div></div>` : ''}
+      ${!w.ex.length && prevDays.length ? `<div class="card"><h3>Refaire</h3><div class="chips">${prevDays.map(d => `<button class="chip" data-copy-day="${d}">${esc(S.days[d].session || autoSession(S.days[d].workout) || 'Séance')} · ${dShort(d)}</button>`).join('')}</div></div>` : ''}
       ${w.ex.map((x, i) => exCard(x, i, date)).join('')}
       <button class="btn" id="wkAdd" style="margin-top:4px">+ Ajouter un exercice</button>
       ${w.ex.length ? `<button class="btn danger" id="wkClear" style="margin-top:10px">Effacer la séance</button>` : ''}`;
@@ -1357,8 +1223,8 @@ function exCard(x, i, date) {
   const variants = e.v || [];
   return `<div class="card" data-x="${i}">
     <div class="row between"><b style="font-size:17px">${esc(x.n)}</b><span class="row" style="gap:12px"><button class="link" data-info title="Voir le mouvement">ⓘ</button><button class="link" data-mv="-1">↑</button><button class="link" data-mv="1">↓</button><button class="del" data-delex style="width:auto">✕</button></span></div>
-    ${variants.length ? `<select class="tinput" data-var style="margin-top:8px;padding:8px 10px;font-size:15px"><option value="">Sans précision</option>${variants.map(v => `<option ${x.v === v ? 'selected' : ''}>${esc(v)}</option>`).join('')}</select>` : ''}
-    <div class="small muted" style="margin:8px 0 4px">${lp ? `Dernière fois (${dShort(lp.d)}) : ${lp.x.sets.map(s => fmtSet(s, t)).join(' · ')}` : 'Première fois sur cet exo 🙂'}${rec ? `<br>Record : <b style="color:var(--text)">${fmtSet(rec.best, t)}</b>` : ''}${pr ? ' <span style="color:var(--green);font-weight:700">· nouveau record 🏆</span>' : ''}</div>
+    ${variants.length ? `<select class="tinput" data-var style="margin-top:8px;padding:8px 10px;font-size:15px"><option value="">—</option>${variants.map(v => `<option ${x.v === v ? 'selected' : ''}>${esc(v)}</option>`).join('')}</select>` : ''}
+    <div class="small muted" style="margin:8px 0 4px">${lp ? `${dShort(lp.d)} : ${lp.x.sets.map(s => fmtSet(s, t)).join(' · ')}` : ''}${rec ? `<br>🏆 ${fmtSet(rec.best, t)}` : ''}${pr ? ' <span style="color:var(--green);font-weight:700">· record !</span>' : ''}</div>
     <div class="sets">${(x.sets || []).map((s, j) => `<div class="setrow"><span class="muted small">${j + 1}</span>
       <input data-set="${j}:r" inputmode="numeric" value="${s.r ?? ''}" placeholder="${t === 'temps' ? 'sec' : 'reps'}"><span class="muted">${t === 'temps' ? 's' : 'reps'}</span>
       <span class="muted">×</span><input data-set="${j}:kg" inputmode="decimal" value="${s.kg != null ? String(s.kg).replace('.', ',') : ''}" placeholder="${t === 'charge' ? 'kg' : 'lest'}"><span class="muted">kg</span>
@@ -1419,38 +1285,36 @@ function renderMuscu() {
   const exList = Object.entries(keys).sort((a, b) => b[1] - a[1]).map(([k, n]) => { const h = exHistory(k); const t = h[0].t; const best = h.reduce((a, b) => b.best.m > a.best.m ? b : a); const g = h.length > 1 ? (h[h.length - 1].best.m - h[0].best.m) / h[0].best.m * 100 : null; return { k, n, h, t, best, g }; });
   v.innerHTML = `
   <div class="row between"><div class="lt">Muscu</div><button class="chip on" id="mNew" style="padding:9px 16px">+ Séance</button></div>
-  <div class="subt">${wds.length ? `${inP.length} séance${inP.length > 1 ? 's' : ''} · ${totSets} séries sur ${P} jours` : 'Note tes séances pour voir ce que tu travailles.'}</div>
+  <div class="subt">${wds.length ? `${inP.length} séance${inP.length > 1 ? 's' : ''} · ${totSets} séries` : ''}</div>
   <div class="seg" id="mSeg">${[[7, '7 jours'], [30, '30 jours'], [90, '3 mois']].map(([n, l]) => `<button data-r="${n}" class="${P === n ? 'on' : ''}">${l}</button>`).join('')}</div>
 
   <div class="card">
     <div class="bodies"><div>${bodySvg('front', perWeek, sel)}<div class="tiny muted" style="text-align:center">Face</div></div><div>${bodySvg('back', perWeek, sel)}<div class="tiny muted" style="text-align:center">Dos</div></div></div>
-    <div class="heatlg"><span class="tiny muted">0</span><i style="background:linear-gradient(90deg,var(--card3),color-mix(in srgb,var(--orange) 50%,var(--card3)),var(--orange),var(--red))"></i><span class="tiny muted">20+ séries/sem.</span></div>
-    <div class="small" style="margin-top:10px;min-height:20px;text-align:center">${sel ? `<b>${MUSCLES[sel]}</b> : ${fmt(perWeek[sel], 1)} séries/sem. <span class="muted">${perWeek[sel] < 10 ? '· en dessous de la zone idéale (10–20)' : perWeek[sel] > 20 ? '· beaucoup, attention à la récup' : '· dans la zone idéale ✓'}${lastTrained(sel) ? ` · dernière fois ${diff(lastTrained(sel), T) === 0 ? "aujourd'hui" : `il y a ${diff(lastTrained(sel), T)} j`}` : ''}</span>` : '<span class="muted">Touche un muscle pour le détail</span>'}</div>
+    <div class="heatlg"><span class="tiny muted">0</span><i style="background:linear-gradient(90deg,var(--card3),color-mix(in srgb,var(--orange) 50%,var(--card3)),var(--orange),var(--red))"></i><span class="tiny muted">20+ séries/sem</span></div>
+    <div class="small" style="margin-top:10px;min-height:20px;text-align:center">${sel ? `<b>${MUSCLES[sel]}</b> · ${fmt(perWeek[sel], 1)} séries/sem ${perWeek[sel] >= 10 && perWeek[sel] <= 20 ? '✓' : ''}` : ''}</div>
   </div>
 
   ${rec ? `<div class="card" style="background:linear-gradient(135deg,color-mix(in srgb,var(--green) 22%,var(--card)),var(--card))">
-    <div class="coach"><div class="ic" style="background:color-mix(in srgb,var(--green) 30%,transparent)">🎯</div><div style="flex:1"><b>Prochaine séance conseillée : ${rec.best.k}</b>
-    <p>${esc(rec.best.sp.l)} — ${rec.best.rest >= 99 ? 'pas encore travaillé' : `dernière fois il y a ${rec.best.rest} j`}, ${fmt(avg(rec.best.sp.m.map(m => rec.ms[m])), 1)} séries/muscle cette semaine (cible 10+).</p></div></div>
+    <div class="coach"><div class="ic" style="background:color-mix(in srgb,var(--green) 30%,transparent)">🎯</div><div style="flex:1"><b>Prochaine séance : ${rec.best.k}</b>
+    <p>${rec.best.rest >= 99 ? 'Pas encore travaillé' : `Il y a ${rec.best.rest} j`}</p></div></div>
     <div class="chips" style="margin-top:10px">${rec.sug.map(s => `<span class="chip">${esc(s)}</span>`).join('')}</div>
-    <div class="small muted" style="margin-top:10px">Point faible de la semaine : <b style="color:var(--text)">${MUSCLES[rec.weakest]}</b> (${fmt(rec.ms[rec.weakest], 1)} série${rec.ms[rec.weakest] >= 2 ? 's' : ''}).</div>
   </div>` : ''}
 
-  <div class="sh">Volume par muscle <small>séries / semaine</small></div>
-  <div class="card">${Object.entries(GROUPS).map(([g, arr]) => `<div class="tiny muted" style="margin:8px 0 2px;text-transform:uppercase;font-weight:600">${g}</div>${arr.map(m => `<div class="vbar" data-mm="${m}"><span>${MUSCLES[m]}</span><div class="vtrack"><s></s><i style="width:${Math.min(100, perWeek[m] / 25 * 100)}%;background:${heat(Math.max(perWeek[m], .1))}"></i></div><b class="num">${fmt(perWeek[m], 0)}</b></div>`).join('')}`).join('')}
-    <div class="small muted" style="margin-top:8px">Zone verte = 10 à 20 séries par semaine et par muscle : l'idéal pour garder et construire du muscle pendant une sèche.</div></div>
+  <div class="sh">Volume <small>séries / sem</small></div>
+  <div class="card">${Object.entries(GROUPS).map(([g, arr]) => `<div class="tiny muted" style="margin:8px 0 2px;text-transform:uppercase;font-weight:600">${g}</div>${arr.map(m => `<div class="vbar" data-mm="${m}"><span>${MUSCLES[m]}</span><div class="vtrack"><s></s><i style="width:${Math.min(100, perWeek[m] / 25 * 100)}%;background:${heat(Math.max(perWeek[m], .1))}"></i></div><b class="num">${fmt(perWeek[m], 0)}</b></div>`).join('')}`).join('')}</div>
 
-  <div class="sh">Tonnage <small>kg soulevés / semaine</small></div>
+  <div class="sh">Tonnage <small>kg / sem</small></div>
   <div class="card"><div class="chart" id="cTon"></div></div>
 
-  <div class="sh">Exercices <small>tape pour le détail</small></div>
-  <div class="card">${exList.length ? exList.map(e => `<div class="jrow" data-exd="${esc(e.k)}"><div class="bd"><b>${esc(e.k)}</b><br><span class="small">Record ${fmtSet(e.best.best, e.t)} · ${e.n} séance${e.n > 1 ? 's' : ''}</span></div>${e.g != null ? `<span class="small ${e.g > 0 ? 'down' : e.g < 0 ? 'up' : 'muted'}" style="font-weight:600">${sgn(e.g, 0)} %</span>` : ''}<span class="chev">›</span></div>`).join('') : '<div class="muted small">Tes records et ta progression par exo apparaîtront ici.</div>'}</div>
+  <div class="sh">Exercices</div>
+  <div class="card">${exList.length ? exList.map(e => `<div class="jrow" data-exd="${esc(e.k)}"><div class="bd"><b>${esc(e.k)}</b><br><span class="small">Record ${fmtSet(e.best.best, e.t)} · ${e.n} séance${e.n > 1 ? 's' : ''}</span></div>${e.g != null ? `<span class="small ${e.g > 0 ? 'down' : e.g < 0 ? 'up' : 'muted'}" style="font-weight:600">${sgn(e.g, 0)} %</span>` : ''}<span class="chev">›</span></div>`).join('') : '<div class="muted small">–</div>'}</div>
 
   <div class="sh">Historique</div>
-  <div class="card">${wds.length ? wds.slice().reverse().slice(0, 40).map(d => { const w = S.days[d].workout, n = w.ex.reduce((a, x) => a + (x.sets || []).length, 0); return `<div class="jrow" data-wd="${d}"><div class="dt">${dShort(d)}<small>${JOURS[pd(d).getDay()].slice(0, 3)}.</small></div><div class="bd"><b>${esc(S.days[d].session || autoSession(w) || 'Séance')}</b> · ${w.ex.length} exos · ${n} séries<br><span class="small">${esc(w.ex.map(x => x.n).join(', '))}</span></div><span class="chev">›</span></div>`; }).join('') : '<div class="muted small">Aucune séance notée.</div>'}</div>`;
+  <div class="card">${wds.length ? wds.slice().reverse().slice(0, 40).map(d => { const w = S.days[d].workout, n = w.ex.reduce((a, x) => a + (x.sets || []).length, 0); return `<div class="jrow" data-wd="${d}"><div class="dt">${dShort(d)}<small>${JOURS[pd(d).getDay()].slice(0, 3)}.</small></div><div class="bd"><b>${esc(S.days[d].session || autoSession(w) || 'Séance')}</b> · ${w.ex.length} exos · ${n} séries<br><span class="small">${esc(w.ex.map(x => x.n).join(', '))}</span></div><span class="chev">›</span></div>`; }).join('') : '<div class="muted small">–</div>'}</div>`;
 
   // tonnage par semaine
   const weeks = []; for (let i = 11; i >= 0; i--) { const end = addDays(T, -7 * i), start = addDays(end, -6); const vol = workoutDays(start).filter(d => d <= end).reduce((s, d) => s + S.days[d].workout.ex.reduce((a, x) => a + (x.sets || []).reduce((b, q) => b + (q.r || 0) * (num(q.kg) || 0), 0), 0), 0); weeks.push([dn(end), vol]); }
-  chart($('#cTon'), { height: 140, yMin: 0, xMin: weeks[0][0] - 4, xMax: weeks[11][0] + 4, yFmt: v => v >= 1000 ? fmt(v / 1000, 0) + 't' : fmt(v, 0), empty: 'Pas encore de séance avec charges', series: [{ type: 'bar', data: weeks.some(w => w[1]) ? weeks : [], color: 'var(--orange)' }], tipFmt: (x, y) => `sem. du ${dShort(fromDn(x - 6))} · ${Math.round(y).toLocaleString('fr-FR')} kg` });
+  chart($('#cTon'), { height: 140, yMin: 0, xMin: weeks[0][0] - 4, xMax: weeks[11][0] + 4, yFmt: v => v >= 1000 ? fmt(v / 1000, 0) + 't' : fmt(v, 0), empty: '–', series: [{ type: 'bar', data: weeks.some(w => w[1]) ? weeks : [], color: 'var(--orange)' }], tipFmt: (x, y) => `sem. du ${dShort(fromDn(x - 6))} · ${Math.round(y).toLocaleString('fr-FR')} kg` });
 
   $('#mNew').onclick = () => openWorkout(T);
   $$('#mSeg button').forEach(b => b.onclick = () => { S.mRange = +b.dataset.r; renderMuscu(); });
