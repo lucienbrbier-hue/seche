@@ -189,6 +189,8 @@ textarea.tinput{resize:none;min-height:44px}
 .fig{width:100%;height:auto;display:block;max-height:220px}
 .figcard{padding:10px 16px;background:linear-gradient(180deg,var(--card),color-mix(in srgb,var(--accent) 8%,var(--card)))}
 .figcard .fig{max-height:300px}
+.twofig{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.twofig span{display:block;text-align:center;font-size:11px;color:var(--sub);margin-top:2px}
 details.cue{margin-top:10px;font-size:14px}
 details.cue summary{color:var(--accent);font-weight:500;cursor:pointer;list-style:none}
 details.cue summary::-webkit-details-marker{display:none}
@@ -1223,7 +1225,7 @@ function exCard(x, i, date) {
   const pr = rec && cur && cur.m > rec.best.m;
   const variants = e.v || [];
   return `<div class="card" data-x="${i}">
-    <div class="row between"><span class="row" style="gap:10px"><span class="thumb" data-info style="cursor:pointer">${figSvg(figKey(x.n, x.v))}</span><b style="font-size:17px">${esc(x.n)}</b></span><span class="row" style="gap:12px"><button class="link" data-mv="-1">↑</button><button class="link" data-mv="1">↓</button><button class="del" data-delex style="width:auto">✕</button></span></div>
+    <div class="row between"><span class="row" style="gap:10px"><span class="thumb" data-info style="cursor:pointer">${figSvg(frontKey(x.n, x.v) || figKey(x.n, x.v))}</span><b style="font-size:17px">${esc(x.n)}</b></span><span class="row" style="gap:12px"><button class="link" data-mv="-1">↑</button><button class="link" data-mv="1">↓</button><button class="del" data-delex style="width:auto">✕</button></span></div>
     ${variants.length ? `<select class="tinput" data-var style="margin-top:8px;padding:8px 10px;font-size:15px"><option value="">—</option>${variants.map(v => `<option ${x.v === v ? 'selected' : ''}>${esc(v)}</option>`).join('')}</select>` : ''}
     <div class="small muted" style="margin:8px 0 4px">${lp ? `${dShort(lp.d)} : ${lp.x.sets.map(s => fmtSet(s, t)).join(' · ')}` : ''}${rec ? `<br>🏆 ${fmtSet(rec.best, t)}` : ''}${pr ? ' <span style="color:var(--green);font-weight:700">· record !</span>' : ''}</div>
     <div class="sets">${(x.sets || []).map((s, j) => `<div class="setrow"><span class="muted small">${j + 1}</span>
@@ -1440,13 +1442,14 @@ const CUE_EX = {
 function figSvg(key, anim = true) {
   if (key && key.startsWith('v2:')) { const k = key.slice(3); return getFig2(k) ? figSvg2(k) : ''; }
   const f = getFig(key); if (!f) return '';
-  const side = f.a.s.length >= 5 && !/^(lateral|lunge|fly)/.test(key);
+  const side = !f.front && f.a.s.length >= 5 && !/^(lateral|lunge|fly|rfly|twist|splank)/.test(key);
   const ln = (s, i, st, w, extra = '') => `<line data-i="${i}" x1="${s[0]}" y1="${s[1]}" x2="${s[2]}" y2="${s[3]}" stroke="${st}" stroke-width="${w}" stroke-linecap="round" ${extra}/>`;
   // de profil : bras/jambe « côté opposé » en retrait pour donner du volume
   const far = side ? f.a.s.slice(1, 5).map((s, k) => ln(s, k + 1, 'var(--sub2)', 4.5, 'transform="translate(-2.5,1)"')).join('') : '';
-  const segs = f.a.s.map((s, i) => { const cable = (f.c || []).includes(i); return ln(s, i, cable ? 'var(--sub)' : 'var(--text)', cable ? 1.2 : i === 0 && side ? 7 : 4.6); }).join('');
+  const segs = f.a.s.map((s, i) => { const cable = (f.c || []).includes(i), bar = (f.bar || []).includes(i); return ln(s, i, cable ? 'var(--sub)' : bar ? 'var(--accent)' : 'var(--text)', cable ? 1.2 : bar ? 3 : (i === 0 && (side || f.front)) ? 7 : 4.6); }).join('');
   const head = `<circle data-h cx="${f.a.h[0]}" cy="${f.a.h[1]}" r="6.5" fill="var(--text)"/>`;
-  const loads = (f.l || []).map(i => { const s = f.a.s[i]; return `<rect data-l="${i}" x="${s[2] - 5}" y="${s[3] - 2.5}" width="10" height="5" rx="2" fill="var(--accent)"/>`; }).join('');
+  const [lw, lh] = f.go === 'v' ? [5, 10] : f.go === 'h' ? [10, 5] : [9, 6];
+  const loads = (f.l || []).map(i => { const s = f.a.s[i]; return `<rect data-l="${i}" data-w="${lw}" data-hh="${lh}" x="${s[2] - lw / 2}" y="${s[3] - lh / 2}" width="${lw}" height="${lh}" rx="2" fill="var(--accent)" ${f.go === 'd' ? `transform="rotate(25 ${s[2]} ${s[3]})"` : ''}/>`; }).join('');
   if (anim) requestAnimationFrame(figLoop);
   return `<svg viewBox="-4 -8 116 108" class="fig" data-fig="${key}" ${anim ? 'data-anim' : ''}><line x1="-4" y1="95.5" x2="112" y2="95.5" stroke="var(--sep)" stroke-width="1"/><g fill="none" stroke="var(--sub2)" stroke-width="2.4" stroke-linecap="round">${f.p || ''}</g>${far}${segs}${head}${loads}</svg>`;
 }
@@ -1464,7 +1467,7 @@ function figLoop() {
       const f = getFig(svg.dataset.fig); if (!f) return;
       svg.querySelectorAll('line[data-i]').forEach(l => { const i = +l.dataset.i, a = f.a.s[i], b = f.b.s[i]; l.setAttribute('x1', L(a[0], b[0])); l.setAttribute('y1', L(a[1], b[1])); l.setAttribute('x2', L(a[2], b[2])); l.setAttribute('y2', L(a[3], b[3])); });
       const h = svg.querySelector('[data-h]'); h.setAttribute('cx', L(f.a.h[0], f.b.h[0])); h.setAttribute('cy', L(f.a.h[1], f.b.h[1]));
-      svg.querySelectorAll('[data-l]').forEach(r => { const i = +r.dataset.l, a = f.a.s[i], b = f.b.s[i]; r.setAttribute('x', L(a[2], b[2]) - 5); r.setAttribute('y', L(a[3], b[3]) - 2.5); });
+      svg.querySelectorAll('[data-l]').forEach(r => { const i = +r.dataset.l, a = f.a.s[i], b = f.b.s[i]; const x = L(a[2], b[2]), y = L(a[3], b[3]); r.setAttribute('x', x - (+r.dataset.w || 10) / 2); r.setAttribute('y', y - (+r.dataset.hh || 5) / 2); if (f.go === 'd') r.setAttribute('transform', `rotate(25 ${x} ${y})`); });
     });
     requestAnimationFrame(step);
   };
@@ -1525,6 +1528,8 @@ const FIGVAR = {
   lunge: { 'Bulgares': 'lungeb' }, squat: { 'Goblet': 'squatf', 'Front': 'squatf' }
 };
 function figKey(n, v) {
+  if (n === 'Front lever' && v) return 'v2:fl:' + v;
+  if (n === 'Gainage' && v === 'Côté') return 'splank';
   let k2 = (FIG2VAR[n] && FIG2VAR[n][v]) || FIG2MAP[n];
   if (k2) { if ((k2 === 'bench_bb' || k2 === 'bench_db') && BENCH_ANG[v]) k2 += '@' + (-BENCH_ANG[v]); return 'v2:' + k2; }
   if (n === 'Écarté haltères') return 'flyl';
@@ -1535,7 +1540,10 @@ function figKey(n, v) {
   if (b === 'bench' && BENCH_ANG[v]) return 'bench@' + BENCH_ANG[v];
   return (FIGVAR[b] && FIGVAR[b][v]) || b;
 }
-function getFig(k) { if (!k) return null; if (FIGS[k]) return FIGS[k]; const m = /^bench@(-?\d+)$/.exec(k); return m ? (FIGS[k] = benchAngle(+m[1])) : null; }
+function getFig(k) {
+  if (!k) return null; if (FIGS[k]) return FIGS[k];
+  if (k.startsWith('fv:')) { const [n, v] = k.slice(3).split('|'), g = FRONTVAR[n] && FRONTVAR[n][v]; if (!g) return null; const f = { ...g() }; f.go = GRIP[v]; return FIGS[k] = f; }
+  const m = /^bench@(-?\d+)$/.exec(k); return m ? (FIGS[k] = benchAngle(+m[1])) : null; }
 
 /* ================= Muscu : moteur d'animation v2 (bonhomme articulé) ================= */
 // angles en degrés : 0 = vers l'avant (droite), 90 = haut, -90 = bas. Les mains/pieds peuvent être « posés » (cinématique inverse).
@@ -1709,6 +1717,7 @@ const FIG2VAR = {
 };
 function getFig2(k) {
   if (FIG2[k]) return FIG2[k];
+  if (k.startsWith('fl:')) { const f = frontLever(k.slice(3)); return f ? (FIG2[k] = f) : null; }
   const m = /^(\w+)@(-?\d+)$/.exec(k); if (m && FIG2[m[1]]) return FIG2[k] = inclined(m[1], +m[2]);
   return null;
 }
@@ -1716,6 +1725,100 @@ function getFig2(k) {
 FIGS.flyl = { a: { h: [60, 54], s: [[47, 62, 73, 62], [47, 62, 52, 48], [52, 48, 57, 36], [73, 62, 68, 48], [68, 48, 63, 36], [60, 62, 60, 66]] }, b: { h: [60, 54], s: [[47, 62, 73, 62], [47, 62, 32, 58], [32, 58, 19, 66], [73, 62, 88, 58], [88, 58, 101, 66], [60, 62, 60, 66]] }, p: '<rect x="50" y="66" width="20" height="5" rx="2"/><line x1="54" y1="71" x2="54" y2="95"/><line x1="66" y1="71" x2="66" y2="95"/>', l: [2, 4] };
 FIGS.rfly = { a: { h: [60, 46], s: [[60, 51, 60, 60], [48, 52, 72, 52], [48, 52, 47, 76], [72, 52, 73, 76], [60, 60, 53, 95], [60, 60, 67, 95]] }, b: { h: [60, 46], s: [[60, 51, 60, 60], [48, 52, 72, 52], [48, 52, 25, 50], [72, 52, 95, 50], [60, 60, 53, 95], [60, 60, 67, 95]] }, l: [2, 3] };
 FIGS.twist = { a: { h: [60, 38], s: [[60, 46, 62, 74], [50, 50, 70, 50], [50, 50, 42, 62], [70, 50, 44, 64], [62, 74, 80, 64], [80, 64, 94, 74]] }, b: { h: [60, 38], s: [[60, 46, 62, 74], [50, 50, 70, 50], [50, 50, 76, 64], [70, 50, 80, 62], [62, 74, 80, 64], [80, 64, 94, 74]] }, l: [3] };
+
+/* ================= Muscu : vues de face (prises, écartement) ================= */
+// format « segments » : s = [tronc, épaules, bras G, avant-bras G, bras D, avant-bras D, jambe G, jambe D, (barre/câble…)]
+const mir = x => 120 - x;
+function body(shY, hipY, legs) { return [[60, shY - 1, 60, hipY], [47, shY, 73, shY], ...legs]; }
+const LEGS_ST = hipY => [[57, hipY, 54, 95], [63, hipY, 66, 95]];
+const LEGS_SIT = [[56, 62, 50, 72], [64, 62, 70, 72]];
+const LEGS_HANG = hipY => [[57, hipY, 55, hipY + 34], [63, hipY, 65, hipY + 34]];
+function arms(shY, eL, hL, eR, hR) { return [[47, shY, ...eL], [...eL, ...hL], [73, shY, ...eR], [...eR, ...hR]]; }
+const symA = (shY, e, h) => arms(shY, e, h, [mir(e[0]), e[1]], [mir(h[0]), h[1]]);
+// ordre : 0 tronc, 1 épaules, 2-5 bras, 6-7 jambes, 8+ extras
+function mk(pose) { return { h: pose.h, s: [...body(pose.shY, pose.hipY, []), ...pose.arms, ...pose.legs, ...(pose.x || [])] }; }
+const GRIP = { 'Pronation': 'h', 'Prise large': 'h', 'Prise serrée': 'h', 'Supination': 'h', 'Neutre': 'v', 'Neutre (triangle)': 'v', 'Triangle': 'v', 'Corde': 'v', 'Marteau': 'v', 'Barre': 'h', 'Classique': 'h', 'Barre droite': 'h', 'Barre EZ': 'd' };
+const GRIP_TXT = { 'Pronation': 'Paumes vers l\'avant', 'Supination': 'Paumes vers toi', 'Neutre': 'Paumes face à face', 'Neutre (triangle)': 'Paumes face à face, mains serrées', 'Triangle': 'Paumes face à face, mains serrées', 'Prise large': 'Mains bien plus larges que les épaules', 'Prise serrée': 'Mains proches', 'Marteau': 'Paumes face à face', 'Classique': 'Paumes vers le haut', 'Corde': 'Mains qui s\'écartent en bas', 'Barre EZ': 'Poignets légèrement tournés' };
+function frontPull(w, seated, gripSup) {
+  const flare = gripSup ? 4 : 9, bar = y => [60 - w - 5, y, 60 + w + 5, y];
+  if (!seated) {
+    const a = mk({ h: [60, 24], shY: 34, hipY: 60, arms: symA(34, [60 - w - 2, 19], [60 - w, 4]), legs: LEGS_HANG(60) });
+    const b = mk({ h: [60, 3], shY: 14, hipY: 40, arms: symA(14, [60 - w - flare, 22], [60 - w, 4]), legs: LEGS_HANG(40) });
+    return { a, b, p: '<line x1="16" y1="4" x2="104" y2="4"/><line x1="102" y1="4" x2="102" y2="95"/>', l: [3, 5], front: 1 };
+  }
+  const a = mk({ h: [60, 27], shY: 36, hipY: 62, arms: symA(36, [60 - w - 2, 20], [60 - w, 6]), legs: LEGS_SIT, x: [bar(6), [60, -8, 60, 6]] });
+  const b = mk({ h: [60, 27], shY: 36, hipY: 62, arms: symA(36, [60 - w - flare - 2, 50], [60 - w, 38]), legs: LEGS_SIT, x: [bar(38), [60, -8, 60, 38]] });
+  return { a, b, p: '<rect x="44" y="64" width="32" height="4" rx="2"/><line x1="60" y1="68" x2="60" y2="95"/>', l: [3, 5], c: [9], bar: [8], front: 1 };
+}
+function frontRow(w, flare, seated) {
+  const legs = seated ? LEGS_SIT : LEGS_ST(58), shY = seated ? 40 : 48, hipY = seated ? 62 : 58, head = seated ? [60, 31] : [60, 41];
+  const bar = y => [60 - w - 5, y, 60 + w + 5, y];
+  const yA = seated ? 50 : 74, yB = seated ? 50 : 58;
+  const a = mk({ h: head, shY, hipY, arms: symA(shY, [60 - w - 1, (shY + yA) / 2], [60 - w, yA]), legs, x: [bar(yA)] });
+  const b = mk({ h: head, shY, hipY, arms: symA(shY, [60 - w - (flare ? 15 : 3), shY + (seated ? 4 : 2)], [60 - w, yB]), legs, x: [bar(yB)] });
+  return { a, b, l: [3, 5], bar: [8], front: 1 };
+}
+function frontPush(w, kind) {
+  const H = shY => [60, shY - 8];
+  const a = mk({ h: H(64), shY: 64, hipY: 66, arms: symA(64, [60 - w + (w > 14 ? 3 : 0), 78], [60 - w, 93]), legs: [] });
+  let b;
+  if (kind === 'archer') b = { h: [72, 74], s: [[72, 81, 72, 84], [59, 82, 85, 82], [59, 82, 46, 88], [46, 88, 34, 93], [85, 82, 98, 86], [98, 86, 86, 93]] };
+  else { const ex = kind === 'diamant' ? 16 : w + 9; b = mk({ h: H(82), shY: 82, hipY: 84, arms: symA(82, [60 - ex, 84], [60 - w, 93]), legs: [] }); }
+  if (kind === 'archer') a.s = [[60, 63, 60, 66], [47, 64, 73, 64], [47, 64, 40, 79], [40, 79, 34, 93], [73, 64, 80, 79], [80, 79, 86, 93]];
+  return { a, b, front: 1, l: [] };
+}
+function frontCurl(grip, oneArm) {
+  const a = mk({ h: [60, 20], shY: 30, hipY: 58, arms: symA(30, [46, 46], [45, 61]), legs: LEGS_ST(58) });
+  const b = mk({ h: [60, 20], shY: 30, hipY: 58, arms: symA(30, [46, 46], [47, 33]), legs: LEGS_ST(58) });
+  return { a, b, l: [3, 5], front: 1 };
+}
+function frontPushdown(kind) {
+  const top = kind === 'Corde' ? [[56, 34], [64, 34]] : [[55, 36], [65, 36]];
+  const bot = kind === 'Corde' ? [[44, 64], [76, 64]] : [[54, 64], [66, 64]];
+  const mkP = (hs, one) => { const ar = arms(30, [48, 47], one ? [52, 58] : hs[0], [72, 47], hs[1]); return mk({ h: [60, 20], shY: 30, hipY: 58, arms: ar, legs: LEGS_ST(58), x: [[60, -8, (hs[0][0] + hs[1][0]) / 2, hs[0][1] - 2]] }); };
+  const one = kind === 'Unilatéral';
+  const a = mkP(one ? [[52, 58], [64, 36]] : top, one), b = mkP(one ? [[52, 58], [68, 64]] : bot, one);
+  if (one) { a.s[8] = [80, -8, 64, 34]; b.s[8] = [80, -8, 68, 62]; }
+  return { a, b, l: one ? [5] : [3, 5], c: [8], front: 1, p: one ? '<line x1="80" y1="-8" x2="80" y2="95"/>' : '' };
+}
+function frontLat(kind) {
+  const base = FIGS.lateral;
+  if (kind === 'Machine') return { a: { h: [60, 15], s: [[60, 23, 60, 58], [52, 28, 68, 28], [52, 28, 46, 46], [46, 46, 50, 58], [68, 28, 74, 46], [74, 46, 70, 58], [60, 58, 53, 94], [60, 58, 67, 94]] }, b: { h: [60, 15], s: [[60, 23, 60, 58], [52, 28, 68, 28], [52, 28, 32, 26], [32, 26, 30, 38], [68, 28, 88, 26], [88, 26, 90, 38], [60, 58, 53, 94], [60, 58, 67, 94]] }, l: [], pads: [2, 4], front: 1 };
+  if (kind === 'Poulie') return { a: { h: [60, 15], s: [[60, 23, 60, 58], [52, 28, 68, 28], [52, 28, 46, 56], [68, 28, 66, 56], [60, 58, 53, 94], [60, 58, 67, 94], [100, 92, 66, 56]] }, b: { h: [60, 15], s: [[60, 23, 60, 58], [52, 28, 68, 28], [52, 28, 46, 56], [68, 28, 95, 30], [60, 58, 53, 94], [60, 58, 67, 94], [100, 92, 95, 30]] }, l: [3], c: [6], p: '<line x1="102" y1="-6" x2="102" y2="95"/>', front: 1 };
+  return base;
+}
+function frontLever(kind) {
+  const bob = (q, d) => ({ ...q, P: [q.P[0], q.P[1] + d] });
+  const Q = {
+    'Tuck': { P: [70, 30], t: 60, W: [76, 4], eb: 'f', A: [74, 34], kb: 'u', ft: 0, hd: -20 },
+    'Advanced tuck': { P: [56, 30], t: 12, W: [78, 4], eb: 'f', A: [62, 36], kb: 'u', ft: 0 },
+    'Une jambe': { P: [56, 30], t: 8, W: [78, 4], eb: 'f', A: [16, 32], kb: 'd', ft: 180, A2: [60, 34], kb2: 'u' },
+    'Complet': { P: [56, 32], t: 6, W: [78, 4], eb: 'f', A: [16, 34], kb: 'd', ft: 180 }
+  }[kind] || null;
+  return Q ? { p: 'bar', a: Q, b: bob(Q, 1.5) } : null;
+}
+Object.assign(FIG2, {
+  crunch_c: { cab: [70, -8], eq: [{ t: 'handle' }], a: { P: [50, 70], t: 90, hd: 0, W: [58, 22], eb: 'f', A: [28, 95], kb: 'd', ft: 180 }, b: { P: [50, 70], t: 34, hd: -30, W: [70, 50], eb: 'd', A: [28, 95], kb: 'd', ft: 180 }, p: '<line x1="70" y1="-8" x2="70" y2="-2"/>' },
+  squat_jump: { k: [{ ...STAND, ua: -60, fa: -60 }, { P: [44, 71], t: 56, A: [60, 95], kb: 'f', ua: -120, fa: -110 }, { P: [60, 42], t: 92, A: [60, 82], kb: 'f', ua: 70, fa: 80, ft: -40 }] }
+});
+FIGS.splank = { a: { h: [86, 56], s: [[78, 62, 50, 80], [78, 62, 80, 78], [80, 78, 94, 80], [50, 80, 34, 87], [34, 87, 16, 93], [78, 62, 64, 72]] }, b: { h: [86, 53], s: [[78, 59, 50, 75], [78, 59, 80, 78], [80, 78, 94, 80], [50, 75, 34, 85], [34, 85, 16, 93], [78, 59, 64, 69]] }, l: [] };
+// clé de la vue « face » pour les variantes de prise
+const FRONTVAR = {
+  'Tractions': { 'Pronation': () => frontPull(18), 'Supination': () => frontPull(13, 0, 1), 'Neutre': () => frontPull(11, 0, 1), 'Prise large': () => frontPull(30), 'Prise serrée': () => frontPull(6, 0, 1) },
+  'Tirage vertical': { 'Prise large': () => frontPull(30, 1), 'Prise serrée': () => frontPull(8, 1, 1), 'Supination': () => frontPull(13, 1, 1), 'Neutre (triangle)': () => frontPull(4, 1, 1) },
+  'Rowing barre': { 'Pronation': () => frontRow(16, 1), 'Supination': () => frontRow(13, 0) },
+  'Tirage horizontal poulie': { 'Triangle': () => frontRow(3, 0, 1), 'Prise large': () => frontRow(22, 1, 1) },
+  'Pompes': { 'Classiques': () => frontPush(16), 'Larges': () => frontPush(27), 'Diamant': () => frontPush(3, 'diamant'), 'Archer': () => frontPush(26, 'archer') },
+  'Curl haltères': { 'Classique': () => frontCurl(), 'Marteau': () => frontCurl() },
+  'Curl barre': { 'Barre droite': () => frontCurl(), 'Barre EZ': () => frontCurl() },
+  'Extension triceps poulie': { 'Corde': () => frontPushdown('Corde'), 'Barre': () => frontPushdown('Barre'), 'Unilatéral': () => frontPushdown('Unilatéral') },
+  'Élévations latérales': { 'Haltères': () => FIGS.lateral, 'Poulie': () => frontLat('Poulie'), 'Machine': () => frontLat('Machine') }
+};
+function frontKey(n, v) { return FRONTVAR[n] && FRONTVAR[n][v] ? 'fv:' + n + '|' + v : null; }
+// variantes « de profil » supplémentaires
+Object.assign(FIG2VAR, {
+  'Crunch': { 'Poulie': 'crunch_c', 'Machine': 'crunch_c' }, 'Squat poids du corps': { 'Sauté': 'squat_jump' }, 'Mollets': { 'Assis': 'calf_s', 'À la presse': 'legpress' }
+});
 
 function exPreview(n, onAdd, v0) {
   const e = exInfo(n); let v = v0 ?? (e.v ? e.v[0] : null);
@@ -1725,10 +1828,10 @@ function exPreview(n, onAdd, v0) {
   const draw = () => {
     const mm = exMuscles({ n, v }), val = {}; Object.entries(mm).forEach(([m, w]) => val[m] = w >= 1 ? 18 : w >= .7 ? 8 : w >= .4 ? 4 : 2);
     const prim = Object.entries(mm).sort((a, b) => b[1] - a[1]).filter(x => x[1] >= .7).map(x => MUSCLES[x[0]]), sec = Object.entries(mm).filter(x => x[1] < .7).map(x => MUSCLES[x[0]]);
-    const fk = figKey(n, v), cue = CUE_EX[n] || CUES[FIGMAP[n]];
+    const fk = figKey(n, v), fv = frontKey(n, v), cue = CUE_EX[n] || CUES[FIGMAP[n]];
     $('#pvBody', ov).innerHTML = `
       ${e.v ? `<div class="chips" style="margin-bottom:12px">${e.v.map(x => `<button class="chip ${x === v ? 'on' : ''}" data-pv="${esc(x)}">${esc(x)}</button>`).join('')}</div>` : ''}
-      ${fk ? `<div class="card figcard">${figSvg(fk)}</div>` : ''}
+      ${fk || fv ? `<div class="card figcard">${fv ? `<div class="twofig"><div>${figSvg(fv)}<span>Face</span></div><div>${figSvg(fk)}<span>Profil</span></div></div>` : figSvg(fk)}${GRIP_TXT[v] ? `<div class="pill acc" style="display:block;width:max-content;margin:8px auto 0">${esc(GRIP_TXT[v])}</div>` : ''}</div>` : ''}
       <div class="card"><div class="bodies" style="max-width:240px">${bodySvg('front', val)}${bodySvg('back', val)}</div>
         <div class="small" style="text-align:center;margin-top:8px"><b>${prim.join(', ') || '–'}</b>${sec.length ? `<span class="muted"> · ${sec.join(', ')}</span>` : ''}</div>
         ${h ? `<div class="small muted" style="text-align:center;margin-top:4px">${h}× ✓</div>` : ''}
