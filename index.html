@@ -117,8 +117,11 @@ textarea.tinput{resize:none;min-height:44px}
 .sleepgrid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:10px}
 .tbox{background:var(--card2);border-radius:14px;padding:10px 12px}
 .tbox span{display:block;font-size:12px;color:var(--sub);margin-bottom:2px}
-.tbox input{background:none;border:0;font-size:24px;font-weight:600;width:100%;min-width:0;max-width:100%;outline:none;padding:0;color:var(--text);-webkit-appearance:none;appearance:none;text-align:left}
-.tbox input::-webkit-date-and-time-value{text-align:left}
+.tst{display:flex;align-items:center;justify-content:space-between;gap:4px}
+.tst button{width:34px;height:34px;flex:none;border-radius:17px;background:var(--card3);color:var(--accent);font-size:20px;display:grid;place-items:center}
+.tst button:active{transform:scale(.92)}
+.tv{position:relative;flex:1;text-align:center;font-size:22px;font-weight:700;min-width:0}
+.tv input{position:absolute;inset:0;width:100%;height:100%;opacity:0;font-size:16px}
 
 /* stats */
 .tile .k{font-size:13px;color:var(--sub);font-weight:500}
@@ -274,10 +277,24 @@ ol.steps li{margin:6px 0}
 /* ================= Config ================= */
 const SB_URL = 'https://jjuxsabzclyzgjyegfsv.supabase.co';
 const SB_KEY = 'sb_publishable_p4M_wiJ9J8B0S-TisxV-Zg_6rRS45dF';
-const sb = supabase.createClient(SB_URL, SB_KEY, { auth: { persistSession: true, autoRefreshToken: true } });
+// Session gardée à la fois en localStorage et en IndexedDB : iOS vide parfois l'un des deux
+const idb = {
+  db: null,
+  open() { return this.db ||= new Promise((res, rej) => { const r = indexedDB.open('seche', 1); r.onupgradeneeded = () => r.result.createObjectStore('kv'); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); }); },
+  async get(k) { try { const db = await this.open(); return await new Promise(res => { const q = db.transaction('kv').objectStore('kv').get(k); q.onsuccess = () => res(q.result ?? null); q.onerror = () => res(null); }); } catch (e) { return null; } },
+  async set(k, v) { try { const db = await this.open(); db.transaction('kv', 'readwrite').objectStore('kv').put(v, k); } catch (e) {} },
+  async del(k) { try { const db = await this.open(); db.transaction('kv', 'readwrite').objectStore('kv').delete(k); } catch (e) {} }
+};
+const authStorage = {
+  getItem: async k => { let v = null; try { v = localStorage.getItem(k); } catch (e) {} if (v == null) { v = await idb.get(k); if (v != null) try { localStorage.setItem(k, v); } catch (e) {} } return v; },
+  setItem: async (k, v) => { try { localStorage.setItem(k, v); } catch (e) {} await idb.set(k, v); },
+  removeItem: async k => { try { localStorage.removeItem(k); } catch (e) {} await idb.del(k); }
+};
+if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
+const sb = supabase.createClient(SB_URL, SB_KEY, { auth: { storage: authStorage, persistSession: true, autoRefreshToken: true, detectSessionInUrl: true } });
 
 const DEFAULTS = {
-  height: 173, startDate: '2026-10-29', startWeight: 67.5, neck: null,
+  height: 173, startDate: '2026-10-29', neck: null, pmOffset: 0.8,
   kcalMin: 2200, kcalMax: 2300, maint: 2550,
   protMin: 120, protMax: 135, rateMin: 0.25, rateMax: 0.5,
   bedStart: '02:00', bedGoal: '00:00', wakeGoal: '08:00', bedStepMin: 20, bedStepDays: 3,
@@ -292,7 +309,7 @@ const DEFAULTS = {
   sessions: ['Dos', 'Pecs', 'Jambes', 'Mix', 'Cali']
 };
 const RATING = { 1: { e: '🟢', l: 'Clean', c: 'var(--green)' }, 2: { e: '🟡', l: 'Correct', c: 'var(--yellow)' }, 3: { e: '🔴', l: 'Écart', c: 'var(--red)' } };
-const DAY_FIELDS = ['weight', 'rating', 'protein', 'protein_log', 'kcal', 'steps', 'bed', 'wake', 'session', 'note'];
+const DAY_FIELDS = ['weight', 'weight_pm', 'rating', 'protein', 'protein_log', 'kcal', 'steps', 'bed', 'wake', 'session', 'note'];
 
 /* ================= State ================= */
 const S = { user: null, days: {}, weekly: {}, photos: [], settings: { ...DEFAULTS }, healthToken: null, cur: null, view: 'today', range: 30, urls: {} };
@@ -342,7 +359,7 @@ async function loadAll() {
   if (d.error || w.error || p.error || s.error) throw (d.error || w.error || p.error || s.error);
   // ne pas écraser ce qui attend d'être envoyé
   const pend = getPending();
-  S.days = {}; d.data.forEach(r => { S.days[r.date] = clean(r); });
+  S.days = {}; d.data.forEach(r => { S.days[r.date] = clean(r); }); wCache = null;
   S.weekly = {}; w.data.forEach(r => { S.weekly[r.date] = { waist: num(r.waist), neck: num(r.neck), perfs: r.perfs || [] }; });
   S.photos = p.data;
   if (s.data) { S.settings = { ...DEFAULTS, ...(s.data.data || {}) }; S.healthToken = s.data.health_token; }
@@ -379,9 +396,10 @@ document.addEventListener('visibilitychange', () => { if (document.visibilitySta
 let lastLoad = 0;
 async function maybeReload() { if (Date.now() - lastLoad < 60000) return; lastLoad = Date.now(); try { await loadAll(); if (S.cur !== today() && !S.dateLocked) S.cur = today(); render(); } catch (e) {} }
 
-function day(date) { return S.days[date] || { weight: null, rating: null, protein: null, protein_log: [], kcal: null, steps: null, bed: null, wake: null, session: null, note: null }; }
+function day(date) { return S.days[date] || { weight: null, weight_pm: null, rating: null, protein: null, protein_log: [], kcal: null, steps: null, bed: null, wake: null, session: null, note: null }; }
 function setDay(date, patch) {
-  const d = { ...day(date), ...patch };
+  const d = { ...day(date), ...patch }; wCache = null;
+  if (d.weight == null) d.weight_pm = null;
   const empty = DAY_FIELDS.every(f => f === 'protein_log' ? !d.protein_log.length : d[f] == null || d[f] === '');
   if (empty) { delete S.days[date]; queue('d:' + date, null); }
   else { S.days[date] = d; queue('d:' + date, d); }
@@ -391,7 +409,27 @@ function saveSettings() { queue('s:x', S.settings, 800); }
 
 /* ================= Calculs ================= */
 const sortedDates = o => Object.keys(o).sort();
-function weights() { return sortedDates(S.days).filter(d => S.days[d].weight != null).map(d => [d, S.days[d].weight]); }
+// Pesées du soir ramenées à un équivalent « matin » (on pèse ~0,5–1,5 kg de plus le soir : eau, repas)
+let wCache = null;
+function rawWeights() { return sortedDates(S.days).filter(d => S.days[d].weight != null).map(d => [d, S.days[d].weight, !!S.days[d].weight_pm]); }
+function pmOffset() {
+  const r = rawWeights().filter(([d]) => diff(d, today()) < 42), nPm = r.filter(x => x[2]).length;
+  if (nPm >= 3 && r.length - nPm >= 3) {
+    // régression poids = a + b·jour + c·soir : c = écart soir/matin propre à toi
+    const mx = avg(r.map(x => dn(x[0])));
+    const X = r.map(([d, , pm]) => [1, dn(d) - mx, pm ? 1 : 0]), Y = r.map(x => x[1]);
+    const A = [0, 1, 2].map(i => [0, 1, 2].map(j => X.reduce((s, x) => s + x[i] * x[j], 0))), B = [0, 1, 2].map(i => X.reduce((s, x, k) => s + x[i] * Y[k], 0));
+    const det = m => m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1]) - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0]) + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0]);
+    const D = det(A);
+    if (Math.abs(D) > 1e-9) { const c = det(A.map((row, i) => [row[0], row[1], B[i]])) / D; if (isFinite(c)) return { v: Math.min(1.8, Math.max(0.2, c)), auto: true }; }
+  }
+  return { v: st().pmOffset ?? 0.8, auto: false };
+}
+function weights() {
+  if (wCache) return wCache;
+  const off = pmOffset().v;
+  return wCache = rawWeights().map(([d, w, pm]) => [d, pm ? w - off : w]);
+}
 function avg7At(date, ws = weights()) { const a = ws.filter(([d]) => d <= date && diff(d, date) < 7).map(x => x[1]); return a.length ? avg(a) : null; }
 function avgSeries(ws = weights()) { return ws.map(([d]) => [d, avg7At(d, ws)]); }
 function linreg(pts) { const n = pts.length; if (n < 2) return null; const mx = avg(pts.map(p => p[0])), my = avg(pts.map(p => p[1])); let a = 0, b = 0; pts.forEach(([x, y]) => { a += (x - mx) * (y - my); b += (x - mx) ** 2; }); if (!b) return null; const s = a / b; return { slope: s, icpt: my - s * mx }; }
@@ -473,6 +511,9 @@ function renderToday() {
   const dayN = diff(s.startDate, date) + 1;
   const lw = weights().filter(([x]) => x < date).pop();
   const a7 = avg7At(date);
+  const off = pmOffset();
+  const pmSel = d.weight != null ? !!d.weight_pm : (S.pmDraft ?? new Date().getHours() >= 14);
+  const adj = d.weight != null ? d.weight - (d.weight_pm ? off.v : 0) : null;
   const prot = d.protein || 0, pc = prot >= s.protMin ? 'var(--green)' : prot >= s.protMin * .7 ? 'var(--orange)' : 'var(--accent)';
   const prev = day(addDays(date, -1));
   const dur = sleepDur(d.bed, d.wake), tgt = bedTarget(date), tgtNext = bedTarget(addDays(date, 1));
@@ -488,9 +529,10 @@ function renderToday() {
   ${isToday && weekDue() ? `<div class="card" style="background:linear-gradient(135deg,color-mix(in srgb,var(--indigo) 35%,var(--card)),var(--card))"><div class="coach"><div class="ic" style="background:var(--indigo)">📏</div><div style="flex:1"><b>Check-in de la semaine</b><p>Tour de taille + tes 3 perfs. 30 secondes.</p></div></div><button class="btn" style="margin-top:12px" id="openWeek">Faire le check-in</button></div>` : ''}
 
   <div class="card">
-    <h3>Poids du matin <span class="r muted">${a7 != null ? `moy. 7 j : ${fmt(a7)} kg` : 'optionnel'}</span></h3>
+    <h3>Poids <span class="r muted">${a7 != null ? `moy. 7 j : ${fmt(a7)} kg` : 'optionnel'}</span></h3>
+    <div class="seg" id="wWhen" style="max-width:240px;margin:0 auto 6px">${[[0, '☀️ Matin'], [1, '🌙 Soir']].map(([k, l]) => `<button data-pm="${k}" class="${+pmSel === k ? 'on' : ''}">${l}</button>`).join('')}</div>
     <div class="wstep"><button data-w="-1">−</button><div class="wv"><input id="wIn" inputmode="decimal" placeholder="${lw ? fmt(lw[1]) : '–'}" value="${d.weight != null ? fmt(d.weight) : ''}"><span class="u">kg</span></div><button data-w="1">+</button></div>
-    <div class="wmeta" id="wMeta">${d.weight != null && lw ? `${sgn(d.weight - lw[1])} kg vs ${dShort(lw[0])} <span class="muted">— l'eau fait varier ±1 kg, regarde la moyenne</span>` : lw ? `Dernière pesée : ${fmt(lw[1])} kg le ${dShort(lw[0])}` : 'Pèse-toi le matin, à jeun, après les toilettes'}</div>
+    <div class="wmeta" id="wMeta">${weightMeta(d, lw, adj, off)}</div>
   </div>
 
   <div class="card">
@@ -521,8 +563,7 @@ function renderToday() {
   <div class="card">
     <h3>Nuit dernière <span class="r muted">${dur ? `<b style="color:var(--text)">${durT(dur)}</b> de sommeil` : ''}</span></h3>
     <div class="sleepgrid">
-      <label class="tbox"><span>Coucher</span><input type="time" id="bed" value="${d.bed || ''}"></label>
-      <label class="tbox"><span>Réveil</span><input type="time" id="wake" value="${d.wake || ''}"></label>
+      ${[['bed', 'Coucher'], ['wake', 'Réveil']].map(([k, l]) => `<div class="tbox"><span>${l}</span><div class="tst"><button data-tk="${k}" data-td="-15">−</button><div class="tv num" id="tv-${k}">${d[k] ? minT(tMin(d[k])) : '–'}<input type="time" data-tp="${k}" value="${d[k] || ''}"></div><button data-tk="${k}" data-td="15">+</button></div></div>`).join('')}
     </div>
     <div class="row between" style="margin-top:10px">
       <span class="small muted">🌙 Ce soir, vise <b style="color:var(--text)">${minT(tgtNext)}</b>${d.bed ? ` · hier ${tMin(d.bed) <= tgt ? '✅' : `+${Math.round(tMin(d.bed) - tgt)} min`}` : ''}</span>
@@ -530,12 +571,23 @@ function renderToday() {
     </div>
   </div>
 
-  ${s.showSteps || s.showKcal ? `<div class="card">
-    ${s.showSteps ? `<div class="field"><label>👟 Pas</label><input id="steps" inputmode="numeric" placeholder="10 000" value="${d.steps ?? ''}"></div>` : ''}
-    ${s.showKcal ? `<div class="field"><label>🔥 Calories <span class="small muted">(optionnel)</span></label><input id="kcal" inputmode="numeric" placeholder="${s.kcalMin}" value="${d.kcal ?? ''}"></div>` : ''}
+  ${s.showSteps ? `<div class="card">
+    <h3>👟 Pas <span class="r muted" id="stepsOk">${d.steps ? '✓ enregistré' : 'objectif ~10 000'}</span></h3>
+    <input class="tinput num" id="steps" inputmode="numeric" pattern="[0-9]*" enterkeyhint="done" placeholder="ex. 9500" value="${d.steps ?? ''}" style="font-size:22px;font-weight:600">
+    <div class="chips" style="margin-top:10px">${[5000, 8000, 10000, 12000, 15000].map(n => `<button class="chip ${d.steps === n ? 'on' : ''}" data-st="${n}">${n / 1000}k</button>`).join('')}</div>
+    <div class="small muted" style="margin-top:8px">Tes pas sont dans l'app <b>Santé</b> de l'iPhone → Parcourir → Activité → Pas.</div>
   </div>` : ''}
+  ${s.showKcal ? `<div class="card"><div class="field"><label>🔥 Calories <span class="small muted">(optionnel)</span></label><input id="kcal" inputmode="numeric" placeholder="${s.kcalMin}" value="${d.kcal ?? ''}"></div></div>` : ''}
   `;
   bindToday();
+}
+function weightMeta(d, lw, adj, off) {
+  if (d.weight == null) return lw ? `Dernière pesée : ${fmt(lw[1])} kg le ${dShort(lw[0])}` : 'Idéal : le matin à jeun. Le soir ça marche aussi, je corrige.';
+  const parts = [];
+  if (d.weight_pm) parts.push(`≈ <b style="color:var(--text)">${fmt(adj)} kg</b> équivalent matin <span class="muted">(−${fmt(off.v)} kg ${off.auto ? 'calculé sur tes pesées' : 'en moyenne le soir'})</span>`);
+  if (lw) parts.push(`${sgn(adj - lw[1])} kg vs ${dShort(lw[0])} <span class="muted">— regarde surtout la moyenne</span>`);
+  else parts.push('1re pesée : c\'est ta référence 📍');
+  return parts.join('<br>');
 }
 function sessionsThisWeek() { const t = pd(today()); const mon = addDays(today(), -((t.getDay() + 6) % 7)); return sortedDates(S.days).filter(d => d >= mon && S.days[d].session).length; }
 function bindToday() {
@@ -544,18 +596,35 @@ function bindToday() {
   $('#dNext').onclick = () => { if (S.cur < today()) { S.cur = addDays(S.cur, 1); S.dateLocked = S.cur !== today(); renderToday(); } };
   $('#dPick').onchange = e => { if (e.target.value) { S.cur = e.target.value > today() ? today() : e.target.value; S.dateLocked = S.cur !== today(); renderToday(); } };
   const wIn = $('#wIn');
-  wIn.onchange = () => { const v = num(wIn.value); if (v != null && (v < 30 || v > 200)) { toast('Poids bizarre 🤔'); return; } setDay(date, { weight: v }); toast(v != null ? 'Poids enregistré ✓' : 'Poids supprimé'); renderToday(); };
-  $$('[data-w]').forEach(b => b.onclick = () => { let v = num(wIn.value); if (v == null) { const lw = weights().filter(([x]) => x <= date).pop(); v = lw ? lw[1] : st().startWeight; } else v += .1 * +b.dataset.w; wIn.value = fmt(v); clearTimeout(timers.w); timers.w = setTimeout(() => wIn.onchange(), 900); });
+  const pmNow = () => !!+($('#wWhen .on')?.dataset.pm || 0);
+  wIn.onchange = () => { const v = num(wIn.value); if (v != null && (v < 30 || v > 200)) { toast('Poids bizarre 🤔'); return; } setDay(date, { weight: v, weight_pm: v != null ? pmNow() : null }); toast(v != null ? 'Poids enregistré ✓' : 'Poids supprimé'); renderToday(); };
+  $$('#wWhen button').forEach(b => b.onclick = () => { const pm = b.dataset.pm === '1'; if (day(date).weight != null) setDay(date, { weight_pm: pm }); else S.pmDraft = pm; renderToday(); });
+  $$('[data-w]').forEach(b => b.onclick = () => { let v = num(wIn.value); if (v == null) { const lw = rawWeights().filter(([x]) => x <= date).pop(); v = lw ? lw[1] : 68; } else v += .1 * +b.dataset.w; wIn.value = fmt(v); clearTimeout(timers.w); timers.w = setTimeout(() => wIn.onchange(), 900); });
   $$('.choice').forEach(b => b.onclick = () => { const r = +b.dataset.v; setDay(date, { rating: day(date).rating === r ? null : r }); renderToday(); });
   $$('[data-f]').forEach(b => b.onclick = () => { const f = st().foods[+b.dataset.f]; addProt(date, f.n, f.g); });
   $('#pFree').onclick = () => { const g = num(prompt('Combien de grammes de protéines ?')); if (g) addProt(date, `${g} g`, Math.round(g)); };
   if ($('#pUndo')) $('#pUndo').onclick = () => { const d = day(date), log = d.protein_log.slice(0, -1); setDay(date, { protein_log: log, protein: log.length ? log.reduce((s, x) => s + x.g, 0) : null }); renderToday(); };
   $$('[data-s]').forEach(b => b.onclick = () => { const x = b.dataset.s; setDay(date, { session: day(date).session === x ? null : x }); renderToday(); });
   if ($('#sNote')) { const n = $('#sNote'); n.oninput = () => { n.style.height = 'auto'; n.style.height = n.scrollHeight + 'px'; clearTimeout(timers.n); timers.n = setTimeout(() => setDay(date, { note: n.value.trim() || null }), 600); }; }
-  $('#bed').onchange = e => { setDay(date, { bed: e.target.value || null }); renderToday(); };
-  $('#wake').onchange = e => { setDay(date, { wake: e.target.value || null }); renderToday(); };
+  // sommeil : boutons −/+ par 15 min (1er appui = valeur cible), ou tap sur l'heure pour la roue iOS
+  const pending = {};
+  $$('[data-tk]').forEach(b => b.onclick = () => {
+    const k = b.dataset.tk, cur = pending[k] ?? day(date)[k];
+    let m = cur ? tMin(cur) : (k === 'bed' ? bedTarget(date) : tMin(st().wakeGoal));
+    if (cur) m += +b.dataset.td;
+    const hm = `${pad(Math.floor(m / 60) % 24)}:${pad(m % 60)}`; pending[k] = hm;
+    $('#tv-' + k).firstChild.textContent = minT(m);
+    clearTimeout(timers['t' + k]); timers['t' + k] = setTimeout(() => { setDay(date, { [k]: hm }); renderToday(); }, 900);
+  });
+  $$('[data-tp]').forEach(i => i.onchange = () => { setDay(date, { [i.dataset.tp]: i.value || null }); renderToday(); });
   if ($('#sameSleep')) $('#sameSleep').onclick = () => { const p = day(addDays(date, -1)); setDay(date, { bed: p.bed, wake: p.wake }); renderToday(); toast('Copié depuis hier'); };
-  if ($('#steps')) $('#steps').onchange = e => setDay(date, { steps: num(e.target.value) != null ? Math.round(num(e.target.value)) : null });
+  if ($('#steps')) {
+    const si = $('#steps'), save = () => { const n = num(si.value.replace(/\s/g, '')); setDay(date, { steps: n != null ? Math.round(n) : null }); $('#stepsOk').textContent = n != null ? '✓ enregistré' : ''; };
+    si.oninput = () => { clearTimeout(timers.st); timers.st = setTimeout(save, 700); };
+    si.onblur = () => { clearTimeout(timers.st); save(); };
+    si.onkeydown = e => { if (e.key === 'Enter') si.blur(); };
+    $$('[data-st]').forEach(b => b.onclick = () => { setDay(date, { steps: +b.dataset.st }); renderToday(); toast('Pas enregistrés ✓'); });
+  }
   if ($('#kcal')) $('#kcal').onchange = e => setDay(date, { kcal: num(e.target.value) != null ? Math.round(num(e.target.value)) : null });
   if ($('#openWeek')) $('#openWeek').onclick = () => openWeekly(today());
 }
@@ -610,8 +679,9 @@ function renderStats() {
   const s = st(), v = $('#v-stats'), T = today();
   const ws = weights(), av = avgSeries(ws);
   const cur7 = avg7At(T, ws), r = rate();
-  const first = ws.length ? ws[0][1] : s.startWeight;
-  const startRef = s.startWeight || first;
+  // référence = moyenne de la 1re semaine de pesées (pas une valeur saisie à la main)
+  const startRef = ws.length ? avg(ws.filter(([d]) => diff(ws[0][0], d) < 7).map(x => x[1])) : null;
+  const sinceStart = ws.length >= 2 && diff(ws[0][0], ws[ws.length - 1][0]) >= 7 ? cur7 - startRef : null;
   const waists = sortedDates(S.weekly).filter(d => S.weekly[d].waist).map(d => [d, S.weekly[d].waist]);
   const bfs = bfSeries();
   const rangeStart = S.range ? addDays(T, -S.range) : null;
@@ -626,7 +696,7 @@ function renderStats() {
   <div class="seg" id="rangeSeg">${[[30, '1 mois'], [90, '3 mois'], [0, 'Tout']].map(([n, l]) => `<button data-r="${n}" class="${S.range === n ? 'on' : ''}">${l}</button>`).join('')}</div>
 
   <div class="grid2">
-    <div class="card tile"><div class="k">Poids (moy. 7 j)</div><div class="v num">${fmt(cur7)}<small>kg</small></div><div class="d ${cls(cur7 - startRef)}">${cur7 != null ? sgn(cur7 - startRef) + ' kg depuis le début' : 'pèse-toi 🙂'}</div></div>
+    <div class="card tile"><div class="k">Poids (moy. 7 j)</div><div class="v num">${fmt(cur7)}<small>kg</small></div><div class="d ${cls(sinceStart)}">${sinceStart != null ? sgn(sinceStart) + ' kg depuis le début' : ws.length ? 'référence en cours (1re sem.)' : 'pèse-toi 🙂'}</div></div>
     <div class="card tile"><div class="k">Rythme</div><div class="v num">${r != null ? sgn(r, 2) : '–'}<small>kg/sem</small></div><div class="d" style="color:${rateColor(loss)}">${loss == null ? 'besoin de ~1 sem.' : loss < s.rateMin ? 'trop lent' : loss > s.rateMax + .1 ? 'trop rapide' : 'dans la cible ✓'}</div></div>
     <div class="card tile"><div class="k">Tour de taille</div><div class="v num">${waists.length ? fmt(waists[waists.length - 1][1]) : '–'}<small>cm</small></div><div class="d ${cls(waists.length > 1 ? waists[waists.length - 1][1] - waists[0][1] : null)}">${waists.length > 1 ? sgn(waists[waists.length - 1][1] - waists[0][1]) + ' cm' : 'check-in hebdo'}</div></div>
     <div class="card tile"><div class="k">Masse grasse (est.)</div><div class="v num">${bfs.length ? fmt(bfs[bfs.length - 1].bf) : '–'}<small>%</small></div><div class="d ${cls(bfs.length > 1 ? bfs[bfs.length - 1].bf - bfs[0].bf : null)}">${bfs.length > 1 ? sgn(bfs[bfs.length - 1].bf - bfs[0].bf) + ' pt' : bfs.length ? 'méthode Navy' : 'taille + cou'}</div></div>
@@ -670,7 +740,7 @@ function renderStats() {
 
   // charts
   const target = [];
-  if (s.startWeight) { const st0 = dn(s.startDate); for (let x = Math.max(st0, xMin ?? st0); x <= xMax; x += 7) target.push([x, s.startWeight - (s.rateMin + s.rateMax) / 2 * (x - st0) / 7]); target.push([xMax, s.startWeight - (s.rateMin + s.rateMax) / 2 * (xMax - st0) / 7]); }
+  if (startRef != null) { const st0 = dn(ws[0][0]), tw = x => startRef - (s.rateMin + s.rateMax) / 2 * (x - st0) / 7; for (let x = Math.max(st0, xMin ?? st0); x <= xMax; x += 7) target.push([x, tw(x)]); target.push([xMax, tw(xMax)]); }
   chart($('#cWeight'), {
     height: 200, xMin, xMax, empty: 'Ajoute ta première pesée dans « Aujourd\'hui »',
     series: [
@@ -678,7 +748,7 @@ function renderStats() {
       { data: ws.filter(([d]) => inR(d)).map(([d, y]) => [dn(d), y]), color: 'var(--accent)', type: 'dots', r: 3.2, op: .45 },
       { data: target.filter(p => p[0] >= (xMin ?? -Infinity)), color: 'var(--green)', dash: '4 5', width: 1.5, op: .6 }
     ],
-    tipFmt: (x, y) => { const d = fromDn(x), raw = S.days[d]?.weight; return `${dShort(d)} · moy ${fmt(y)}${raw != null ? ` · pesée ${fmt(raw)}` : ''}`; }
+    tipFmt: (x, y) => { const d = fromDn(x), raw = S.days[d]?.weight; return `${dShort(d)} · moy ${fmt(y)}${raw != null ? ` · pesée ${fmt(raw)}${S.days[d].weight_pm ? ' 🌙' : ''}` : ''}`; }
   });
   chart($('#cComp'), { height: 170, empty: 'Fais un check-in avec tour de taille + cou<br>pour voir masse grasse / maigre', series: [
     { data: bfs.filter(b => b.lean != null).map(b => [dn(b.d), b.lean - bfs[0].lean]), color: 'var(--teal)', dotsAll: true },
@@ -932,11 +1002,11 @@ function renderSettings() {
 
   <div class="ghd">Profil</div>
   <div class="glist">
-    ${gnum('height', 'Taille', 'cm')}${gnum('startWeight', 'Poids de départ', 'kg')}
+    ${gnum('height', 'Taille', 'cm')}${gnum('pmOffset', 'Écart pesée soir', 'kg')}
     <div class="gitem"><span>Début de la sèche</span><input type="date" data-k="startDate" value="${s.startDate}" style="width:150px"></div>
     ${gnum('neck', 'Tour de cou', 'cm')}
   </div>
-  <div class="gft">Le tour de cou (mesuré sous la pomme d'Adam) + ton tour de taille = estimation du % de gras.</div>
+  <div class="gft">Le tour de cou (mesuré sous la pomme d'Adam) + ton tour de taille = estimation du % de gras. Écart pesée soir : ce qu'on retire à une pesée du soir pour la comparer au matin${pmOffset().auto ? ` — calculé automatiquement sur tes pesées : <b>${fmt(pmOffset().v, 2)} kg</b>` : ' (calculé automatiquement dès 3 pesées matin + 3 soir)'}.</div>
 
   <div class="ghd">Objectifs</div>
   <div class="glist">
@@ -1002,7 +1072,7 @@ function gnum(k, l, u) { const v = st()[k]; return `<div class="gitem"><span>${l
 function bindSettings() {
   const s = st();
   $$('#themeSeg button').forEach(b => b.onclick = () => { s.theme = b.dataset.t; applyTheme(); saveSettings(); renderSettings(); });
-  $$('[data-n]').forEach(i => i.onchange = () => { s[i.dataset.n] = num(i.value) ?? (i.dataset.n === 'neck' ? null : DEFAULTS[i.dataset.n]); saveSettings(); toast('Enregistré ✓'); });
+  $$('[data-n]').forEach(i => i.onchange = () => { wCache = null; s[i.dataset.n] = num(i.value) ?? (i.dataset.n === 'neck' ? null : DEFAULTS[i.dataset.n]); saveSettings(); toast('Enregistré ✓'); });
   $$('[data-k]').forEach(i => i.onchange = () => { if (i.value) { s[i.dataset.k] = i.value; saveSettings(); toast('Enregistré ✓'); } });
   $$('[data-b]').forEach(i => i.onchange = () => { s[i.dataset.b] = i.checked; saveSettings(); });
   $$('[data-fn]').forEach(i => i.onchange = () => { s.foods[+i.dataset.fn].n = i.value.trim() || 'Aliment'; saveSettings(); });
@@ -1026,6 +1096,7 @@ $('#importInput').onchange = async e => {
     const data = JSON.parse(await f.text()); if (data.app !== 'seche') throw new Error('fichier non reconnu');
     if (!confirm(`Importer ${Object.keys(data.days || {}).length} jours et ${Object.keys(data.weekly || {}).length} check-ins ? Les jours existants seront remplacés.`)) return;
     if (data.settings) { S.settings = { ...DEFAULTS, ...data.settings }; saveSettings(); }
+    wCache = null;
     Object.entries(data.days || {}).forEach(([d, r]) => { S.days[d] = clean(r); queue('d:' + d, S.days[d], 50); });
     Object.entries(data.weekly || {}).forEach(([d, r]) => { S.weekly[d] = r; queue('w:' + d, r, 50); });
     applyTheme(); render(); toast('Import terminé ✓');
