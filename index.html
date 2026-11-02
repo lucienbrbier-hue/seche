@@ -1450,8 +1450,10 @@ function figSvg(key, anim = true) {
   const head = `<circle data-h cx="${f.a.h[0]}" cy="${f.a.h[1]}" r="6.5" fill="var(--text)"/>`;
   const [lw, lh] = f.go === 'v' ? [5, 10] : f.go === 'h' ? [10, 5] : [9, 6];
   const loads = (f.l || []).map(i => { const s = f.a.s[i]; return `<rect data-l="${i}" data-w="${lw}" data-hh="${lh}" x="${s[2] - lw / 2}" y="${s[3] - lh / 2}" width="${lw}" height="${lh}" rx="2" fill="var(--accent)" ${f.go === 'd' ? `transform="rotate(25 ${s[2]} ${s[3]})"` : ''}/>`; }).join('');
+  const hl = f.hand ? (f.hl || (f.front && (f.l && f.l.length ? f.l : [3, 5]))) : [];
+  const hands = (hl || []).map(i => { const s = f.a.s[i], flip = s[2] < 60; return `<g data-g="${i}" data-flip="${flip ? 1 : 0}" transform="translate(${s[2]},${s[3]}) scale(${flip ? -1.45 : 1.45},1.45)">${HANDG[f.hand]}</g>`; }).join('');
   if (anim) requestAnimationFrame(figLoop);
-  return `<svg viewBox="-4 -8 116 108" class="fig" data-fig="${key}" ${anim ? 'data-anim' : ''}><line x1="-4" y1="95.5" x2="112" y2="95.5" stroke="var(--sep)" stroke-width="1"/><g fill="none" stroke="var(--sub2)" stroke-width="2.4" stroke-linecap="round">${f.p || ''}</g>${far}${segs}${head}${loads}</svg>`;
+  return `<svg viewBox="-4 -8 116 108" class="fig" data-fig="${key}" ${anim ? 'data-anim' : ''}><line x1="-4" y1="95.5" x2="112" y2="95.5" stroke="var(--sep)" stroke-width="1"/><g fill="none" stroke="var(--sub2)" stroke-width="2.4" stroke-linecap="round">${f.p || ''}</g>${far}${segs}${head}${loads}${hands}</svg>`;
 }
 let figRunning = false;
 function figLoop() {
@@ -1460,13 +1462,14 @@ function figLoop() {
   const step = ts => {
     const svgs = $$('svg.fig[data-anim]'); if (!svgs.length) { figRunning = false; return; }
     // aller 45 %, pause, retour 45 %, pause
-    const ph = (ts % 2800) / 2800, t = ph < .45 ? ease(ph / .45) : ph < .5 ? 1 : ph < .95 ? 1 - ease((ph - .5) / .45) : 0;
+    const ph = (ts % 3400) / 3400, t = ph < .45 ? ease(ph / .45) : ph < .5 ? 1 : ph < .95 ? 1 - ease((ph - .5) / .45) : 0;
     const L = (a, b) => a + (b - a) * t;
     svgs.forEach(svg => {
       if (svg.dataset.fig2) { const f2 = getFig2(svg.dataset.fig2); if (f2) place2(svg, f2, t); return; }
       const f = getFig(svg.dataset.fig); if (!f) return;
       svg.querySelectorAll('line[data-i]').forEach(l => { const i = +l.dataset.i, a = f.a.s[i], b = f.b.s[i]; l.setAttribute('x1', L(a[0], b[0])); l.setAttribute('y1', L(a[1], b[1])); l.setAttribute('x2', L(a[2], b[2])); l.setAttribute('y2', L(a[3], b[3])); });
       const h = svg.querySelector('[data-h]'); h.setAttribute('cx', L(f.a.h[0], f.b.h[0])); h.setAttribute('cy', L(f.a.h[1], f.b.h[1]));
+      svg.querySelectorAll('[data-g]').forEach(g => { const i = +g.dataset.g, a = f.a.s[i], b = f.b.s[i]; g.setAttribute('transform', `translate(${L(a[2], b[2])},${L(a[3], b[3])}) scale(${g.dataset.flip === '1' ? -1.45 : 1.45},1.45)`); });
       svg.querySelectorAll('[data-l]').forEach(r => { const i = +r.dataset.l, a = f.a.s[i], b = f.b.s[i]; const x = L(a[2], b[2]), y = L(a[3], b[3]); r.setAttribute('x', x - (+r.dataset.w || 10) / 2); r.setAttribute('y', y - (+r.dataset.hh || 5) / 2); if (f.go === 'd') r.setAttribute('transform', `rotate(25 ${x} ${y})`); });
     });
     requestAnimationFrame(step);
@@ -1542,34 +1545,46 @@ function figKey(n, v) {
 }
 function getFig(k) {
   if (!k) return null; if (FIGS[k]) return FIGS[k];
-  if (k.startsWith('fv:')) { const [n, v] = k.slice(3).split('|'), g = FRONTVAR[n] && FRONTVAR[n][v]; if (!g) return null; const f = { ...g() }; f.go = GRIP[v]; return FIGS[k] = f; }
+  if (k.startsWith('fv:')) { const [n, v] = k.slice(3).split('|'), g = FRONTVAR[n] && FRONTVAR[n][v]; if (!g) return null; const f = { ...g() }; f.go = GRIP[v]; f.hand = HANDMAP[n] && HANDMAP[n][v]; if (f.hand && !/^Curl/.test(n)) f.l = []; if (f.hand === 'flat') f.hl = [3, 5]; return FIGS[k] = f; }
   const m = /^bench@(-?\d+)$/.exec(k); return m ? (FIGS[k] = benchAngle(+m[1])) : null; }
 
 /* ================= Muscu : moteur d'animation v2 (bonhomme articulé) ================= */
 // angles en degrés : 0 = vers l'avant (droite), 90 = haut, -90 = bas. Les mains/pieds peuvent être « posés » (cinématique inverse).
 const V2 = (l, d) => [l * Math.cos(d * Math.PI / 180), -l * Math.sin(d * Math.PI / 180)];
 const AD = (p, v) => [p[0] + v[0], p[1] + v[1]];
-function ik2(S, T, l1, l2, pref) {
+// sg (±1) fige le côté où se plie le coude/genou : sinon il peut « sauter » de l'autre côté en pleine animation
+function ik2(S, T, l1, l2, pref, sg) {
   let dx = T[0] - S[0], dy = T[1] - S[1], d = Math.hypot(dx, dy); const L = l1 + l2 - .01;
   if (d > L) { dx *= L / d; dy *= L / d; d = L; }
   d = Math.max(d, Math.abs(l1 - l2) + .5);
   const base = Math.atan2(dy, dx), a = Math.acos(Math.max(-1, Math.min(1, (l1 * l1 + d * d - l2 * l2) / (2 * l1 * d))));
   const c1 = [S[0] + l1 * Math.cos(base + a), S[1] + l1 * Math.sin(base + a)], c2 = [S[0] + l1 * Math.cos(base - a), S[1] + l1 * Math.sin(base - a)];
   const pick = { f: (p, q) => p[0] > q[0], b: (p, q) => p[0] < q[0], u: (p, q) => p[1] < q[1], d: (p, q) => p[1] > q[1] }[pref || 'f'];
-  return [pick(c1, c2) ? c1 : c2, [S[0] + dx, S[1] + dy]];
+  const s = sg || (pick(c1, c2) ? 1 : -1);
+  return [s > 0 ? c1 : c2, [S[0] + dx, S[1] + dy], s];
 }
-function solve2(q) {
-  const P = q.P, S = AD(P, V2(q.tl ?? 26, q.t)), H = AD(S, V2(q.nl ?? 10, q.t + (q.hd ?? 0)));
-  const arm = (W, ua, fa, pref) => W ? ik2(S, W, 15, 14, pref) : (() => { const E = AD(S, V2(15, ua)); return [E, AD(E, V2(14, fa))]; })();
-  const leg = (A, th, sh, pref) => A ? ik2(P, A, 20, 20, pref) : (() => { const K = AD(P, V2(20, th)); return [K, AD(K, V2(20, sh))]; })();
-  const [E, W] = arm(q.W, q.ua ?? -90, q.fa ?? -90, q.eb), [K, A] = leg(q.A, q.th ?? -90, q.sh ?? -90, q.kb);
+function solve2(q, sg = {}) {
+  const out = {}, P = q.P, S = AD(P, V2(q.tl ?? 26, q.t)), H = AD(S, V2(q.nl ?? 10, q.t + (q.hd ?? 0)));
+  const arm = (W, ua, fa, pref, k) => { if (W) { const r = ik2(S, W, 15, 14, pref, sg[k]); out[k] = r[2]; return r; } const E = AD(S, V2(15, ua)); return [E, AD(E, V2(14, fa))]; };
+  const leg = (A, th, sh, pref, k) => { if (A) { const r = ik2(P, A, 20, 20, pref, sg[k]); out[k] = r[2]; return r; } const K = AD(P, V2(20, th)); return [K, AD(K, V2(20, sh))]; };
+  const [E, W] = arm(q.W, q.ua ?? -90, q.fa ?? -90, q.eb, 'a'), [K, A] = leg(q.A, q.th ?? -90, q.sh ?? -90, q.kb, 'l');
   const T = q.T || AD(A, V2(7, q.ft ?? 0));
   const a2 = q.W2 || q.ua2 != null, l2 = q.A2 || q.th2 != null;
-  const [E2, W2] = a2 ? arm(q.W2, q.ua2, q.fa2, q.eb2 ?? q.eb) : [AD(E, [-2.5, 1]), AD(W, [-2.5, 1])];
-  const [K2, A2] = l2 ? leg(q.A2, q.th2, q.sh2, q.kb2 ?? q.kb) : [AD(K, [-2.5, 1]), AD(A, [-2.5, 1])];
+  const [E2, W2] = a2 ? arm(q.W2, q.ua2, q.fa2, q.eb2 ?? q.eb, 'a2') : [AD(E, [-2.5, 1]), AD(W, [-2.5, 1])];
+  const [K2, A2] = l2 ? leg(q.A2, q.th2, q.sh2, q.kb2 ?? q.kb, 'l2') : [AD(K, [-2.5, 1]), AD(A, [-2.5, 1])];
   const T2 = l2 ? (q.T2 || AD(A2, V2(7, q.ft2 ?? q.ft ?? 0))) : AD(T, [-2.5, 1]);
   const Wh = q.wa != null ? AD(W, V2(6, q.wa)) : W;
-  return { H, S, P, E, W, K, A, T, E2, W2, K2, A2, T2, Wh };
+  return { H, S, P, E, W, K, A, T, E2, W2, K2, A2, T2, Wh, sg: out };
+}
+// un seul côté de pliage par membre pour toute l'animation : celui de la position la plus pliée (la moins ambiguë)
+function figSigns(kf) {
+  const sg = {};
+  [['a', 'S', 'W'], ['l', 'P', 'A'], ['a2', 'S', 'W2'], ['l2', 'P', 'A2']].forEach(([k, r, e]) => {
+    let best = null;
+    kf.forEach(q => { const j = solve2(q); if (j.sg[k] == null) return; const d = Math.hypot(j[e][0] - j[r][0], j[e][1] - j[r][1]); if (!best || d < best.d) best = { d, s: j.sg[k] }; });
+    if (best) sg[k] = best.s;
+  });
+  return sg;
 }
 function lerpQ(a, b, t) {
   const o = {};
@@ -1613,7 +1628,8 @@ function place2(svg, f, t) {
   const kf = f.k || [f.a, f.b];
   // plusieurs étapes possibles : on découpe le cycle
   const n = kf.length, seg = Math.min(n - 1, Math.floor(t * (n - 1))), lt = t * (n - 1) - seg;
-  const q = lerpQ(kf[seg], kf[Math.min(n - 1, seg + 1)], lt), j = solve2(q);
+  f._sg = f._sg || figSigns(kf);
+  const q = lerpQ(kf[seg], kf[Math.min(n - 1, seg + 1)], lt), j = solve2(q, f._sg);
   const set = (c, a, b) => { const l = svg.querySelector('.' + c); if (l) { l.setAttribute('x1', a[0]); l.setAttribute('y1', a[1]); l.setAttribute('x2', b[0]); l.setAttribute('y2', b[1]); } };
   set('tr', j.P, j.S); set('nk', j.S, AD(j.S, V2(4, q.t + (q.hd ?? 0))));
   set('ua', j.S, j.E); set('fa', j.E, j.W); set('th', j.P, j.K); set('sh', j.K, j.A); set('ft', j.A, j.T);
@@ -1813,6 +1829,22 @@ const FRONTVAR = {
   'Curl barre': { 'Barre droite': () => frontCurl(), 'Barre EZ': () => frontCurl() },
   'Extension triceps poulie': { 'Corde': () => frontPushdown('Corde'), 'Barre': () => frontPushdown('Barre'), 'Unilatéral': () => frontPushdown('Unilatéral') },
   'Élévations latérales': { 'Haltères': () => FIGS.lateral, 'Poulie': () => frontLat('Poulie'), 'Machine': () => frontLat('Machine') }
+};
+// main vue de face : paume visible / dos de la main (jointures) / main de profil / à plat
+const HANDG = {
+  palm: '<rect x="-4" y="-5" width="8" height="10" rx="3.5" fill="var(--text)" stroke="var(--bg)" stroke-width="1"/><path d="M-2 1.5 Q0 -1 2.5 0" fill="none" stroke="var(--bg)" stroke-width="1"/><rect x="3" y="-1.5" width="3.2" height="5.5" rx="1.6" fill="var(--text)" stroke="var(--bg)" stroke-width=".8"/>',
+  back: '<rect x="-4" y="-5" width="8" height="10" rx="3.5" fill="var(--text)" stroke="var(--bg)" stroke-width="1"/><circle cx="-2.3" cy="-2.6" r=".9" fill="var(--bg)"/><circle cx="0" cy="-3" r=".9" fill="var(--bg)"/><circle cx="2.3" cy="-2.6" r=".9" fill="var(--bg)"/>',
+  side: '<rect x="-2.6" y="-5.5" width="5.2" height="11" rx="2.6" fill="var(--text)" stroke="var(--bg)" stroke-width="1"/><circle cx="0" cy="-6.2" r="1.9" fill="var(--text)" stroke="var(--bg)" stroke-width=".8"/>',
+  flat: '<rect x="-5.5" y="-2.2" width="11" height="4.4" rx="2.2" fill="var(--text)" stroke="var(--bg)" stroke-width="1"/>'
+};
+const HANDMAP = {
+  'Tractions': { 'Pronation': 'palm', 'Prise large': 'palm', 'Prise serrée': 'palm', 'Supination': 'back', 'Neutre': 'side' },
+  'Tirage vertical': { 'Prise large': 'palm', 'Prise serrée': 'palm', 'Supination': 'back', 'Neutre (triangle)': 'side' },
+  'Rowing barre': { 'Pronation': 'back', 'Supination': 'palm' },
+  'Tirage horizontal poulie': { 'Triangle': 'side', 'Prise large': 'back' },
+  'Pompes': { 'Classiques': 'flat', 'Larges': 'flat', 'Diamant': 'flat', 'Archer': 'flat' },
+  'Curl haltères': { 'Classique': 'palm', 'Marteau': 'side' }, 'Curl barre': { 'Barre droite': 'palm', 'Barre EZ': 'palm' },
+  'Extension triceps poulie': { 'Corde': 'side', 'Barre': 'back', 'Unilatéral': 'back' }
 };
 function frontKey(n, v) { return FRONTVAR[n] && FRONTVAR[n][v] ? 'fv:' + n + '|' + v : null; }
 // variantes « de profil » supplémentaires
