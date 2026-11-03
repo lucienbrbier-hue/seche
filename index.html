@@ -1049,7 +1049,7 @@ const EXLIB = [
   { n: 'Australian rows', g: 'Dos', t: 'pdc', m: { trapezes: 1, dorsaux: .7, biceps: .5 } },
   { n: 'Pull-over', g: 'Dos', m: { dorsaux: 1, pecs: .4 } },
   { n: 'Face pull', g: 'Dos', m: { ep_arr: 1, trapezes: .6 } },
-  { n: 'Shrugs', g: 'Dos', m: { trapezes: 1 } },
+  { n: 'Shrugs', g: 'Dos', m: { trapezes: 1 }, v: ['Haltères', 'Barre'] },
   { n: 'Soulevé de terre', g: 'Dos', m: { lombaires: 1, ischios: .8, fessiers: .8, trapezes: .5, quadris: .4 } },
   { n: 'Muscle-up', g: 'Dos', t: 'pdc', m: { dorsaux: 1, triceps: .6, pecs: .5, biceps: .4 } },
   { n: 'Front lever', g: 'Dos', t: 'temps', m: { dorsaux: 1, abdos: .7 }, v: ['Tuck', 'Advanced tuck', 'Une jambe', 'Complet'] },
@@ -1090,6 +1090,23 @@ const EXLIB = [
 ];
 const GROUP_DEFAULT_M = { Pecs: { pecs: 1, pecs_h: .5, triceps: .4 }, Dos: { dorsaux: 1, trapezes: .5, biceps: .3 }, 'Épaules': { ep_av: .7, ep_lat: .7 }, Bras: { biceps: .6, triceps: .6 }, Jambes: { quadris: .8, fessiers: .6, ischios: .5 }, Abdos: { abdos: 1 } };
 function allEx() { return EXLIB.concat(st().customEx || []); }
+// quel poids noter : 'db' = 1 haltère (on en tient 2 → ×2 au tonnage), 'one' = 1 seul haltère/poignée, sinon poids total (barre comprise)
+function loadMode(x) {
+  const n = x.n, v = x.v || '';
+  if (n === 'Rowing haltère' || n === 'Extension nuque haltère' || n === 'Pull-over' || (n === 'Curl haltères' && v === 'Concentration') || (n === 'Élévations latérales' && v === 'Poulie') || (n === 'Squat' && v === 'Goblet')) return 'one';
+  if (['Développé haltères', 'Écarté haltères', 'Curl haltères', 'Élévations frontales', 'Fentes'].includes(n)) return 'db';
+  if ((n === 'Élévations latérales' || n === 'Oiseau' || n === 'Shrugs') && (v === 'Haltères' || !v)) return 'db';
+  if (n === 'Développé militaire' && /Haltères|Arnold/.test(v)) return 'db';
+  return 'total';
+}
+function loadTxt(x) {
+  const m = loadMode(x), v = x.v || '';
+  if (m === 'db') return 'Poids d\'1 haltère';
+  const barre = /barre|Soulevé|Hip thrust/i.test(x.n) && !/Tirage|poulie/i.test(x.n) || /Barre|Smith/.test(v) || (x.n === 'Squat' && !v) || (x.n === 'Développé militaire' && !v) || x.n === 'Shrugs' && v === 'Barre';
+  if (m === 'one') return /Poulie/.test(v) ? 'Poids affiché (1 bras)' : 'Poids de l\'haltère';
+  return barre ? 'Poids total, barre comprise' : 'Poids affiché sur la machine / poulie';
+}
+const volOf = x => (x.sets || []).reduce((a, q) => a + (q.r || 0) * (num(q.kg) || 0), 0) * (loadMode(x) === 'db' ? 2 : 1);
 function exInfo(n) { return allEx().find(e => e.n === n) || { n, g: 'Autre', m: {}, t: 'charge' }; }
 const exT = e => e.t || 'charge';
 const exKey = x => x.n + (x.v ? ' · ' + x.v : '');
@@ -1102,7 +1119,7 @@ function bestSet(sets, t) { let b = null; (sets || []).forEach(s => { const m = 
 function fmtSet(s, t) { if (!s) return '–'; const kg = num(s.kg); const u = t === 'temps' ? ' s' : ''; return kg ? `${s.r}${u} × ${fmt(kg, kg % 1 ? 1 : 0)} kg` : `${s.r}${u || ' reps'}`; }
 // historique d'un exercice (+ variante) : une ligne par séance
 function exHistory(key) {
-  return workoutDays().map(d => { const x = S.days[d].workout.ex.find(e => exKey(e) === key); if (!x || !x.sets?.length) return null; const t = exT(exInfo(x.n)); const b = bestSet(x.sets, t); return b ? { d, x, t, best: b, vol: x.sets.reduce((s, q) => s + (q.r || 0) * (num(q.kg) || 0), 0), reps: avg(x.sets.map(q => q.r || 0)) } : null; }).filter(Boolean);
+  return workoutDays().map(d => { const x = S.days[d].workout.ex.find(e => exKey(e) === key); if (!x || !x.sets?.length) return null; const t = exT(exInfo(x.n)); const b = bestSet(x.sets, t); return b ? { d, x, t, best: b, vol: volOf(x), reps: avg(x.sets.map(q => q.r || 0)) } : null; }).filter(Boolean);
 }
 function lastPerf(key, before) { const h = exHistory(key).filter(r => r.d < before); return h.length ? h[h.length - 1] : null; }
 // séries « effectives » par muscle sur une période
@@ -1192,7 +1209,7 @@ function openWorkout(date) {
   const draw = () => {
     const w = structuredClone(day(date).workout || { ex: [] });
     const nSets = w.ex.reduce((s, x) => s + (x.sets || []).length, 0);
-    const vol = w.ex.reduce((s, x) => s + (x.sets || []).reduce((a, q) => a + (q.r || 0) * (num(q.kg) || 0), 0), 0);
+    const vol = w.ex.reduce((s, x) => s + volOf(x), 0);
     const prevDays = workoutDays().filter(d => d < date).reverse().slice(0, 6);
     $('#wkBody', ov).innerHTML = `
       <div class="hd"><span></span><b>Séance · ${esc(dShort(date))}</b><button class="link" id="wkDone" style="font-weight:700">OK</button></div>
@@ -1226,11 +1243,12 @@ function exCard(x, i, date) {
   const variants = e.v || [];
   return `<div class="card" data-x="${i}">
     <div class="row between"><span class="row" style="gap:10px"><span class="thumb" data-info style="cursor:pointer">${figSvg(frontKey(x.n, x.v) || figKey(x.n, x.v))}</span><b style="font-size:17px">${esc(x.n)}</b></span><span class="row" style="gap:12px"><button class="link" data-mv="-1">↑</button><button class="link" data-mv="1">↓</button><button class="del" data-delex style="width:auto">✕</button></span></div>
+    ${t === 'charge' ? `<div class="tiny muted" style="margin-top:6px">⚖️ ${loadTxt(x)}</div>` : ''}
     ${variants.length ? `<select class="tinput" data-var style="margin-top:8px;padding:8px 10px;font-size:15px"><option value="">—</option>${variants.map(v => `<option ${x.v === v ? 'selected' : ''}>${esc(v)}</option>`).join('')}</select>` : ''}
     <div class="small muted" style="margin:8px 0 4px">${lp ? `${dShort(lp.d)} : ${lp.x.sets.map(s => fmtSet(s, t)).join(' · ')}` : ''}${rec ? `<br>🏆 ${fmtSet(rec.best, t)}` : ''}${pr ? ' <span style="color:var(--green);font-weight:700">· record !</span>' : ''}</div>
     <div class="sets">${(x.sets || []).map((s, j) => `<div class="setrow"><span class="muted small">${j + 1}</span>
       <input data-set="${j}:r" inputmode="numeric" value="${s.r ?? ''}" placeholder="${t === 'temps' ? 'sec' : 'reps'}"><span class="muted">${t === 'temps' ? 's' : 'reps'}</span>
-      <span class="muted">×</span><input data-set="${j}:kg" inputmode="decimal" value="${s.kg != null ? String(s.kg).replace('.', ',') : ''}" placeholder="${t === 'charge' ? 'kg' : 'lest'}"><span class="muted">kg</span>
+      <span class="muted">×</span><input data-set="${j}:kg" inputmode="decimal" value="${s.kg != null ? String(s.kg).replace('.', ',') : ''}" placeholder="${t !== 'charge' ? 'lest' : loadMode(x) === 'total' ? 'total' : '1 haltère'}"><span class="muted">kg</span>
       <button class="del" data-delset="${j}" style="font-size:18px">−</button></div>`).join('')}</div>
     <button class="chip ghost" data-addset style="margin-top:8px">+ Série</button>
   </div>`;
@@ -1316,7 +1334,7 @@ function renderMuscu() {
   <div class="card">${wds.length ? wds.slice().reverse().slice(0, 40).map(d => { const w = S.days[d].workout, n = w.ex.reduce((a, x) => a + (x.sets || []).length, 0); return `<div class="jrow" data-wd="${d}"><div class="dt">${dShort(d)}<small>${JOURS[pd(d).getDay()].slice(0, 3)}.</small></div><div class="bd"><b>${esc(S.days[d].session || autoSession(w) || 'Séance')}</b> · ${w.ex.length} exos · ${n} séries<br><span class="small">${esc(w.ex.map(x => x.n).join(', '))}</span></div><span class="chev">›</span></div>`; }).join('') : '<div class="muted small">–</div>'}</div>`;
 
   // tonnage par semaine
-  const weeks = []; for (let i = 11; i >= 0; i--) { const end = addDays(T, -7 * i), start = addDays(end, -6); const vol = workoutDays(start).filter(d => d <= end).reduce((s, d) => s + S.days[d].workout.ex.reduce((a, x) => a + (x.sets || []).reduce((b, q) => b + (q.r || 0) * (num(q.kg) || 0), 0), 0), 0); weeks.push([dn(end), vol]); }
+  const weeks = []; for (let i = 11; i >= 0; i--) { const end = addDays(T, -7 * i), start = addDays(end, -6); const vol = workoutDays(start).filter(d => d <= end).reduce((s, d) => s + S.days[d].workout.ex.reduce((a, x) => a + volOf(x), 0), 0); weeks.push([dn(end), vol]); }
   chart($('#cTon'), { height: 140, yMin: 0, xMin: weeks[0][0] - 4, xMax: weeks[11][0] + 4, yFmt: v => v >= 1000 ? fmt(v / 1000, 0) + 't' : fmt(v, 0), empty: '–', series: [{ type: 'bar', data: weeks.some(w => w[1]) ? weeks : [], color: 'var(--orange)' }], tipFmt: (x, y) => `sem. du ${dShort(fromDn(x - 6))} · ${Math.round(y).toLocaleString('fr-FR')} kg` });
 
   $('#mNew').onclick = () => openWorkout(T);
@@ -1330,7 +1348,7 @@ function exDetail(key) {
   const h = exHistory(key); if (!h.length) return;
   const t = h[0].t, best = h.reduce((a, b) => b.best.m > a.best.m ? b : a), e = exInfo(h[0].x.n);
   const avgBest = avg(h.map(r => r.best.m)), avgReps = avg(h.map(r => r.reps));
-  const label = t === 'charge' && num(best.best.kg) ? '1RM estimé' : t === 'temps' ? 'Meilleur temps' : 'Max reps';
+  const label = t === 'charge' && num(best.best.kg) ? (loadMode(h[0].x) === 'total' ? '1RM estimé' : '1RM / haltère') : t === 'temps' ? 'Meilleur temps' : 'Max reps';
   const ov = sheet(`<div class="hd"><button class="link" data-close>Fermer</button><b>${esc(key)}</b><span style="width:52px"></span></div>
     <div class="grid2" style="margin-bottom:12px">
       <div class="card tile"><div class="k">Record</div><div class="v num" style="font-size:22px">${fmtSet(best.best, t)}</div><div class="d muted">${dShort(best.d)}</div></div>
