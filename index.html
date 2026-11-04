@@ -174,6 +174,8 @@ textarea.tinput{resize:none;min-height:44px}
 .flist{margin-top:4px}
 .fitem{display:flex;justify-content:space-between;gap:8px;padding:7px 0;border-top:.5px solid var(--sep);font-size:14px;cursor:pointer}
 .fitem:first-child{border-top:0}
+.fitem{align-items:center}
+.fdel{width:28px;height:28px;border-radius:14px;background:var(--card2);color:var(--sub);font-size:13px;flex:none}
 
 /* muscu */
 .bodies{display:grid;grid-template-columns:1fr 1fr;gap:8px;max-width:360px;margin:0 auto}
@@ -678,7 +680,8 @@ function foodCard(d) {
     <h3>Bouffe</h3>
     <div class="row between small"><span><b class="num" style="font-size:20px">${Math.round(t.k)}</b> <span class="muted">/ ${s.kcalMax} kcal</span></span><span><b class="num" style="font-size:20px">${Math.round(t.p)}</b> <span class="muted">/ ${s.protMin} g prot.</span></span></div>
     ${bar(t.k, s.kcalMax, kc)}${bar(t.p, s.protMin, t.p >= s.protMin ? 'var(--green)' : 'var(--purple)')}
-    ${L.length ? `<div class="flist">${L.map((f, i) => `<div class="fitem" data-fi="${i}"><span>${esc(f.e || '•')} ${esc(f.n)}${f.ph ? ' 📷' : ''}</span><span class="muted num">${f.kcal != null ? Math.round(f.kcal) + ' kcal · ' + Math.round(f.p || 0) + ' g' : '<span class="pill">à estimer</span>'}</span></div>`).join('')}</div>` : ''}
+    ${L.length ? `<div class="flist">${L.map((f, i) => `<div class="fitem" data-fi="${i}"><span style="flex:1">${esc(f.e || '•')} ${esc(f.n)}${f.ph ? ' 📷' : ''}</span><span class="muted num">${f.kcal != null ? Math.round(f.kcal) + ' kcal · ' + Math.round(f.p || 0) + ' g' : '<span class="pill">à estimer</span>'}</span><button class="fdel" data-fdel="${i}" aria-label="Supprimer">✕</button></div>`).join('')}</div>
+    <button class="link small" id="fUndo" style="margin-top:6px">↩︎ Annuler le dernier</button>` : ''}
     <div class="chips" style="margin-top:10px">${s.meals.map((m, i) => `<button class="chip" data-meal="${i}">${esc(m.e || '')} ${esc(m.n)}</button>`).join('')}</div>
     <div class="row" style="gap:8px;margin-top:10px"><button class="btn sec" id="fLabel" style="padding:10px">+ Étiquette</button><button class="btn sec" id="fPhoto" style="padding:10px">📷 Photo</button></div>
   </div>`;
@@ -688,6 +691,8 @@ function bindFood(date) {
   $('#fLabel').onclick = () => foodSheet(date);
   $('#fPhoto').onclick = () => { S.foodPhotoDate = date; $('#foodPhotoInput').click(); };
   $$('[data-fi]').forEach(el => el.onclick = () => foodSheet(date, +el.dataset.fi));
+  $$('[data-fdel]').forEach(b => b.onclick = e => { e.stopPropagation(); const L = [...foodList(day(date))], [x] = L.splice(+b.dataset.fdel, 1); setFood(date, L); renderToday(); toast(`Retiré · ${x.n}`); });
+  if ($('#fUndo')) $('#fUndo').onclick = () => { const L = [...foodList(day(date))], x = L.pop(); setFood(date, L); renderToday(); toast(`Retiré · ${x.n}`); };
 }
 function foodSheet(date, idx) {
   const L = foodList(day(date)), f = idx != null ? L[idx] : null;
