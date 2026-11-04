@@ -170,6 +170,11 @@ textarea.tinput{resize:none;min-height:44px}
 .bars .b span{width:62px;color:var(--sub)}
 .bars .b div{height:18px;border-radius:5px;background:var(--accent);min-width:4px}
 
+/* bouffe */
+.flist{margin-top:4px}
+.fitem{display:flex;justify-content:space-between;gap:8px;padding:7px 0;border-top:.5px solid var(--sep);font-size:14px;cursor:pointer}
+.fitem:first-child{border-top:0}
+
 /* muscu */
 .bodies{display:grid;grid-template-columns:1fr 1fr;gap:8px;max-width:360px;margin:0 auto}
 .body{width:100%;display:block}
@@ -298,6 +303,7 @@ ol.steps li{margin:6px 0}
 
 <div id="toast" class="toast"></div>
 <input id="photoInput" type="file" accept="image/*" multiple class="hidden">
+<input id="foodPhotoInput" type="file" accept="image/*" class="hidden">
 <input id="importInput" type="file" accept="application/json,.json" class="hidden">
 
 <script src="supabase.js"></script>
@@ -327,7 +333,14 @@ const DEFAULTS = {
   kcalMin: 2200, kcalMax: 2300, maint: 2550,
   protMin: 120, protMax: 135, rateMin: 0.25, rateMax: 0.5,
   bedStart: '02:00', bedGoal: '00:00', wakeGoal: '08:00', bedStepMin: 20, bedStepDays: 3,
-  theme: 'dark', showKcal: false, showSteps: true, showRating: false, showProt: false,
+  theme: 'dark', showKcal: false, showSteps: true, showRating: false, showProt: false, showFood: true,
+  // aliments rapides (kcal + protéines pour la portion)
+  meals: [
+    { e: '🍽', n: 'Crous complet', kcal: 950, p: 38 }, { e: '🥗', n: 'Crous léger', kcal: 700, p: 32 },
+    { e: '🍌', n: 'Banane', kcal: 100, p: 1 }, { e: '🥛', n: 'Skyr', kcal: 90, p: 15 }, { e: '🥤', n: 'Shaker whey', kcal: 120, p: 24 },
+    { e: '🥪', n: 'Sodebo houmous feta', kcal: 424, p: 14 }, { e: '🥪', n: 'Sandwich poulet tika', kcal: 548, p: 26 },
+    { e: '🥖', n: 'Jambon-beurre', kcal: 450, p: 18 }, { e: '🥚', n: '2 œufs', kcal: 150, p: 12 }, { e: '🍫', n: 'Barre chocolatée', kcal: 250, p: 3 }
+  ],
   foods: [
     { n: 'Skyr', g: 15 }, { n: 'Jambon-beurre', g: 18 }, { n: 'Shaker', g: 25 },
     { n: '2 œufs', g: 12 }, { n: 'Thon', g: 25 }, { n: 'Viande/poisson', g: 30 }
@@ -338,7 +351,7 @@ const DEFAULTS = {
   sessions: ['Dos', 'Pecs', 'Jambes', 'Mix', 'Cali']
 };
 const RATING = { 1: { e: '🟢', l: 'Clean', c: 'var(--green)' }, 2: { e: '🟡', l: 'Correct', c: 'var(--yellow)' }, 3: { e: '🔴', l: 'Écart', c: 'var(--red)' } };
-const DAY_FIELDS = ['weight', 'weight_pm', 'workout', 'rating', 'protein', 'protein_log', 'kcal', 'steps', 'bed', 'wake', 'session', 'note'];
+const DAY_FIELDS = ['weight', 'weight_pm', 'workout', 'food', 'rating', 'protein', 'protein_log', 'kcal', 'steps', 'bed', 'wake', 'session', 'note'];
 
 /* ================= State ================= */
 const S = { user: null, days: {}, weekly: {}, photos: [], settings: { ...DEFAULTS }, healthToken: null, cur: null, view: 'today', range: 30, urls: {} };
@@ -425,7 +438,7 @@ document.addEventListener('visibilitychange', () => { if (document.visibilitySta
 let lastLoad = 0;
 async function maybeReload() { if (Date.now() - lastLoad < 60000) return; lastLoad = Date.now(); try { await loadAll(); if (S.cur !== today() && !S.dateLocked) S.cur = today(); render(); } catch (e) {} }
 
-function day(date) { return S.days[date] || { weight: null, weight_pm: null, workout: null, rating: null, protein: null, protein_log: [], kcal: null, steps: null, bed: null, wake: null, session: null, note: null }; }
+function day(date) { return S.days[date] || { weight: null, weight_pm: null, workout: null, food: null, rating: null, protein: null, protein_log: [], kcal: null, steps: null, bed: null, wake: null, session: null, note: null }; }
 function setDay(date, patch) {
   const d = { ...day(date), ...patch }; wCache = null;
   if (d.weight == null) d.weight_pm = null;
@@ -562,7 +575,9 @@ function renderToday() {
     <div class="choices">${[1, 2, 3].map(r => `<button class="choice ${d.rating === r ? 'on' : ''}" data-v="${r}"><span class="e">${RATING[r].e}</span>${RATING[r].l}</button>`).join('')}</div>
   </div>` : ''}
 
-  ${s.showProt ? `<div class="card">
+  ${s.showFood ? foodCard(d) : ''}
+
+  ${s.showProt && !s.showFood ? `<div class="card">
     <h3>Protéines <span class="r muted">objectif ${s.protMin}–${s.protMax} g</span></h3>
     <div class="prot">
       <div class="ring">${ring(prot, s.protMin, pc)}<div class="c"><b class="num">${prot}</b><span>/ ${s.protMin} g</span></div></div>
@@ -647,9 +662,71 @@ function bindToday() {
   }
   if ($('#kcal')) $('#kcal').onchange = e => setDay(date, { kcal: num(e.target.value) != null ? Math.round(num(e.target.value)) : null });
   $('#openWk').onclick = () => openWorkout(date);
+  if (st().showFood) bindFood(date);
 }
 function addProt(date, n, g) { const d = day(date), log = [...d.protein_log, { n, g }]; setDay(date, { protein_log: log, protein: log.reduce((s, x) => s + x.g, 0) }); renderToday(); toast(`+${g} g · ${n}`); }
 
+/* ================= Bouffe ================= */
+const foodList = d => (d.food || []);
+const foodTot = d => foodList(d).reduce((a, f) => ({ k: a.k + (f.kcal || 0), p: a.p + (f.p || 0) }), { k: 0, p: 0 });
+function setFood(date, list) { const t = list.reduce((a, f) => ({ k: a.k + (f.kcal || 0), p: a.p + (f.p || 0) }), { k: 0, p: 0 }); setDay(date, { food: list.length ? list : null, kcal: list.length ? Math.round(t.k) : null, protein: list.length ? Math.round(t.p) : null }); }
+function foodCard(d) {
+  const s = st(), t = foodTot(d), L = foodList(d);
+  const kc = t.k > s.kcalMax + 100 ? 'var(--orange)' : t.k >= s.kcalMin ? 'var(--green)' : 'var(--accent)';
+  const bar = (v, max, col) => `<div class="pbar" style="margin:4px 0 8px"><i style="width:${Math.min(100, v / max * 100)}%;background:${col}"></i></div>`;
+  return `<div class="card">
+    <h3>Bouffe</h3>
+    <div class="row between small"><span><b class="num" style="font-size:20px">${Math.round(t.k)}</b> <span class="muted">/ ${s.kcalMax} kcal</span></span><span><b class="num" style="font-size:20px">${Math.round(t.p)}</b> <span class="muted">/ ${s.protMin} g prot.</span></span></div>
+    ${bar(t.k, s.kcalMax, kc)}${bar(t.p, s.protMin, t.p >= s.protMin ? 'var(--green)' : 'var(--purple)')}
+    ${L.length ? `<div class="flist">${L.map((f, i) => `<div class="fitem" data-fi="${i}"><span>${esc(f.e || '•')} ${esc(f.n)}${f.ph ? ' 📷' : ''}</span><span class="muted num">${f.kcal != null ? Math.round(f.kcal) + ' kcal · ' + Math.round(f.p || 0) + ' g' : '<span class="pill">à estimer</span>'}</span></div>`).join('')}</div>` : ''}
+    <div class="chips" style="margin-top:10px">${s.meals.map((m, i) => `<button class="chip" data-meal="${i}">${esc(m.e || '')} ${esc(m.n)}</button>`).join('')}</div>
+    <div class="row" style="gap:8px;margin-top:10px"><button class="btn sec" id="fLabel" style="padding:10px">+ Étiquette</button><button class="btn sec" id="fPhoto" style="padding:10px">📷 Photo</button></div>
+  </div>`;
+}
+function bindFood(date) {
+  $$('[data-meal]').forEach(b => b.onclick = () => { const m = st().meals[+b.dataset.meal]; setFood(date, [...foodList(day(date)), { e: m.e, n: m.n, kcal: m.kcal, p: m.p }]); renderToday(); toast(`+${m.kcal} kcal · ${m.n}`); });
+  $('#fLabel').onclick = () => foodSheet(date);
+  $('#fPhoto').onclick = () => { S.foodPhotoDate = date; $('#foodPhotoInput').click(); };
+  $$('[data-fi]').forEach(el => el.onclick = () => foodSheet(date, +el.dataset.fi));
+}
+function foodSheet(date, idx) {
+  const L = foodList(day(date)), f = idx != null ? L[idx] : null;
+  const ov = sheet(`<div class="hd"><button class="link" data-close>Annuler</button><b>${f ? 'Modifier' : 'Ajouter'}</b><button class="link" id="fsOk" style="font-weight:700">OK</button></div>
+    <div class="card">
+      <input class="tinput" id="fsN" placeholder="Nom (ex. sandwich poulet)" value="${esc(f?.n && f.n !== 'Photo' ? f.n : '')}">
+      <div class="seg" id="fsMode" style="margin:12px 0 4px"><button data-m="100" class="${f ? '' : 'on'}">Étiquette /100 g</button><button data-m="tot" class="${f ? 'on' : ''}">Total</button></div>
+      <div id="fs100" class="${f ? 'hidden' : ''}">
+        <div class="field"><label>kcal pour 100 g</label><input id="fsK100" inputmode="decimal" placeholder="219"></div>
+        <div class="field"><label>Protéines pour 100 g</label><input id="fsP100" inputmode="decimal" placeholder="10,4"></div>
+        <div class="field"><label>Poids mangé (g)</label><input id="fsW" inputmode="decimal" placeholder="250"></div>
+      </div>
+      <div id="fsTot" class="${f ? '' : 'hidden'}">
+        <div class="field"><label>kcal</label><input id="fsK" inputmode="decimal" value="${f?.kcal ?? ''}"></div>
+        <div class="field"><label>Protéines (g)</label><input id="fsP" inputmode="decimal" value="${f?.p ?? ''}"></div>
+      </div>
+      <div class="small muted" id="fsCalc" style="margin-top:6px"></div>
+      <label class="row small" style="margin-top:10px;gap:8px"><input type="checkbox" id="fsSave" ${f ? '' : 'checked'}> Ajouter à mes boutons</label>
+    </div>
+    ${f?.ph ? `<button class="btn sec" id="fsPh">Voir la photo</button>` : ''}
+    ${f ? `<button class="btn danger" id="fsDel" style="margin-top:10px">Supprimer</button>` : ''}`);
+  let mode = f ? 'tot' : '100';
+  const calc = () => { if (mode !== '100') return null; const k = num($('#fsK100', ov).value), p = num($('#fsP100', ov).value), w = num($('#fsW', ov).value); if (k == null || !w) { $('#fsCalc', ov).textContent = ''; return null; } const r = { kcal: Math.round(k * w / 100), p: Math.round((p || 0) * w / 10) / 10 }; $('#fsCalc', ov).textContent = `= ${r.kcal} kcal · ${fmt(r.p, 0)} g de protéines`; return r; };
+  ['#fsK100', '#fsP100', '#fsW'].forEach(q => $(q, ov).oninput = calc);
+  $$('#fsMode button', ov).forEach(b => b.onclick = () => { mode = b.dataset.m; $$('#fsMode button', ov).forEach(x => x.classList.toggle('on', x === b)); $('#fs100', ov).classList.toggle('hidden', mode !== '100'); $('#fsTot', ov).classList.toggle('hidden', mode === '100'); });
+  $('#fsOk', ov).onclick = () => {
+    const n = $('#fsN', ov).value.trim() || (f?.n) || 'Aliment';
+    const r = mode === '100' ? calc() : { kcal: num($('#fsK', ov).value), p: num($('#fsP', ov).value) };
+    if (!r || r.kcal == null) { toast('Indique au moins les kcal'); return; }
+    const item = { e: f?.e || '🍴', n, kcal: Math.round(r.kcal), p: Math.round(r.p || 0), ...(f?.ph ? { ph: f.ph } : {}) };
+    const list = [...L]; if (f) list[idx] = item; else list.push(item);
+    setFood(date, list);
+    if ($('#fsSave', ov).checked && !st().meals.some(m => m.n.toLowerCase() === n.toLowerCase())) { st().meals.push({ e: '🍴', n, kcal: item.kcal, p: item.p }); saveSettings(); }
+    ov.remove(); renderToday(); toast('Ajouté ✓');
+  };
+  if ($('#fsDel', ov)) $('#fsDel', ov).onclick = () => { const list = [...L]; list.splice(idx, 1); setFood(date, list); ov.remove(); renderToday(); };
+  if ($('#fsPh', ov)) $('#fsPh', ov).onclick = async () => { const u = await signedUrls([f.ph]); viewerSimple(u[f.ph]); };
+}
+function viewerSimple(url) { const el = document.createElement('div'); el.className = 'viewer'; el.innerHTML = `<div class="vb"><button class="link" style="color:#fff">Fermer</button><span></span><span></span></div><img src="${url}">`; el.querySelector('button').onclick = () => el.remove(); document.body.appendChild(el); }
 function sheet(html) {
   const ov = document.createElement('div'); ov.className = 'overlay';
   ov.innerHTML = `<div class="sheet"><div class="grab"></div>${html}</div>`;
@@ -689,7 +766,7 @@ function renderStats() {
   <div class="sh">Poids <small>${projection(cur7, r)}</small></div>
   <div class="card"><div class="chart" id="cWeight"></div></div>
 
-  ${st().showProt ? `<div class="sh">Protéines</div>${protCard()}` : ''}
+  ${st().showFood ? foodStats() : st().showProt ? `<div class="sh">Protéines</div>${protCard()}` : ''}
 
   <div class="sh">Sommeil</div>
   ${sleepCard()}
@@ -716,6 +793,8 @@ function renderStats() {
     tipFmt: (x, y) => { const d = fromDn(x), raw = S.days[d]?.weight; return `${dShort(d)} · moy ${fmt(y)}${raw != null ? ` · pesée ${fmt(raw)}${S.days[d].weight_pm ? ' 🌙' : ''}` : ''}`; }
   });
   const pd14 = []; for (let i = 13; i >= 0; i--) { const d = addDays(T, -i); pd14.push([dn(d), S.days[d]?.protein ?? 0]); }
+  if ($('#cKcal')) { const kd = []; for (let i = 13; i >= 0; i--) { const d = addDays(T, -i); kd.push([dn(d), S.days[d]?.food ? S.days[d].kcal || 0 : null]); }
+    chart($('#cKcal'), { height: 140, xMin: dn(addDays(T, -13)) - .5, xMax: dn(T) + .5, yMin: 0, extraY: [s.kcalMax + 300], band: [s.kcalMin, s.kcalMax], yFmt: v => fmt(v, 0), empty: '–', series: [{ type: 'bar', data: kd.filter(x => x[1] != null), color: y => y > s.kcalMax + 100 ? 'var(--orange)' : y >= s.kcalMin ? 'var(--green)' : 'var(--accent)' }], tipFmt: (x, y) => `${dShort(fromDn(x))} · ${y} kcal` }); }
   if ($('#cProt')) chart($('#cProt'), { height: 140, xMin: dn(addDays(T, -13)) - .5, xMax: dn(T) + .5, yMin: 0, extraY: [s.protMax + 10], band: [s.protMin, s.protMax], yFmt: v => fmt(v, 0), series: [{ type: 'bar', data: pd14, color: y => y >= s.protMin ? 'var(--green)' : y > 0 ? 'var(--accent)' : 'var(--card2)' }], tipFmt: (x, y) => `${dShort(fromDn(x))} · ${y} g` });
   const sl = sortedDates(S.days).filter(d => inR(d) && S.days[d].bed).map(d => [dn(d), tMin(S.days[d].bed)]);
   const tg = []; { const a = Math.max(dn(s.startDate), xMin ?? dn(s.startDate)); for (let x = a; x <= xMax + 1; x++) tg.push([x, bedTarget(fromDn(x))]); }
@@ -740,6 +819,14 @@ function coachCard(r, dayN) {
   else if (loss > s.rateMax + .1) { t = 'Trop rapide'; p = 'Mange un peu plus (+150 kcal) pour garder ton muscle.'; ic = '⚡️'; col = 'var(--red)'; }
   else { t = 'Dans la cible'; p = 'Ne change rien.'; ic = '✅'; col = 'var(--green)'; }
   return `<div class="card"><div class="coach"><div class="ic" style="background:color-mix(in srgb,${col} 25%,transparent)">${ic}</div><div><b>${t}</b>${p ? `<p>${p}</p>` : ''}</div></div></div>`;
+}
+function foodStats() {
+  const s = st(), T = today(), ds = []; for (let i = 0; i < 7; i++) { const x = S.days[addDays(T, -i)]; if (x && x.food) ds.push(x); }
+  const k = avg(ds.map(x => x.kcal || 0)), p = avg(ds.map(x => x.protein || 0));
+  return `<div class="sh">Bouffe <small>moy. 7 j</small></div><div class="card">
+    <div class="row between"><div><div class="muted small">Calories</div><div class="bigv num" style="font-size:26px">${k ? Math.round(k) : '–'}<small> kcal</small></div></div>
+    <div style="text-align:right"><div class="muted small">Protéines</div><div class="bigv num" style="font-size:26px;color:${p >= s.protMin ? 'var(--green)' : 'var(--text)'}">${p ? Math.round(p) : '–'}<small> g</small></div></div></div>
+    <div class="chart" id="cKcal" style="margin-top:12px"></div></div>`;
 }
 function protCard() {
   const s = st(), T = today(), p = day(T).protein || 0;
@@ -837,6 +924,18 @@ function viewer(p, url) {
 function compress(file, max = 1600, q = .82) {
   return new Promise((res, rej) => { const img = new Image(); const u = URL.createObjectURL(file); img.onload = () => { const sc = Math.min(1, max / Math.max(img.width, img.height)); const c = document.createElement('canvas'); c.width = Math.round(img.width * sc); c.height = Math.round(img.height * sc); c.getContext('2d').drawImage(img, 0, 0, c.width, c.height); URL.revokeObjectURL(u); c.toBlob(b => b ? res(b) : rej(new Error('compression')), 'image/jpeg', q); }; img.onerror = () => rej(new Error('image illisible')); img.src = u; });
 }
+$('#foodPhotoInput').onchange = async e => {
+  const file = e.target.files[0]; e.target.value = ''; if (!file) return; const date = S.foodPhotoDate || today();
+  try {
+    toast('Envoi de la photo…');
+    const blob = await compress(file, 1400, .8), path = `${S.user.id}/food/${date}_${Math.random().toString(36).slice(2, 10)}.jpg`;
+    const up = await sb.storage.from('photos').upload(path, blob, { contentType: 'image/jpeg' }); if (up.error) throw up.error;
+    const n = prompt('C\'est quoi ? (optionnel)') || 'Photo';
+    const m = st().meals.find(x => x.n.toLowerCase() === n.toLowerCase());
+    setFood(date, [...foodList(day(date)), m ? { e: m.e, n: m.n, kcal: m.kcal, p: m.p, ph: path } : { e: '📷', n, kcal: null, p: null, ph: path }]);
+    renderToday(); toast(m ? 'Ajouté ✓' : 'Photo ajoutée · à estimer');
+  } catch (err) { toast('Erreur : ' + (err.message || err)); }
+};
 $('#photoInput').onchange = async e => {
   const files = [...e.target.files]; e.target.value = ''; if (!files.length) return;
   let ok = 0; toast(`Envoi de ${files.length} photo${files.length > 1 ? 's' : ''}…`);
@@ -958,7 +1057,10 @@ function renderSettings() {
     ${gnum('bedStepMin', 'Avancer de', 'min')}
   </div>
 
-  ${s.showProt ? `<div class="ghd">Boutons protéines</div>
+  ${s.showFood ? `<div class="ghd">Mes aliments</div>
+  <div class="glist">${s.meals.map((m, i) => `<div class="gitem"><button class="del" data-delm="${i}">⊖</button><input data-me="${i}" value="${esc(m.e || '')}" style="width:30px;text-align:center"><input class="wide" data-mn="${i}" value="${esc(m.n)}"><input data-mk="${i}" inputmode="numeric" value="${m.kcal}" style="width:50px"><span class="muted small">kcal</span><input data-mp="${i}" inputmode="numeric" value="${m.p}" style="width:34px"><span class="muted small">g</span></div>`).join('')}</div>` : ''}
+
+  ${s.showProt && !s.showFood ? `<div class="ghd">Boutons protéines</div>
   <div class="glist" id="foodList">${s.foods.map((f, i) => `<div class="gitem"><button class="del" data-delf="${i}">⊖</button><input class="wide" data-fn="${i}" value="${esc(f.n)}"><input data-fg="${i}" inputmode="numeric" value="${f.g}" style="width:56px"><span class="muted">g</span></div>`).join('')}
     <div class="gitem"><button class="link" id="addFood">+ Ajouter un aliment</button></div></div>` : ''}
 
@@ -969,6 +1071,7 @@ function renderSettings() {
   <div class="glist">
     <div class="gitem"><span>Afficher les pas</span><label class="switch"><input type="checkbox" data-b="showSteps" ${s.showSteps ? 'checked' : ''}><span></span></label></div>
     <div class="gitem"><span>Note repas 🟢🟡🔴</span><label class="switch"><input type="checkbox" data-b="showRating" ${s.showRating ? 'checked' : ''}><span></span></label></div>
+    <div class="gitem"><span>Suivi bouffe</span><label class="switch"><input type="checkbox" data-b="showFood" ${s.showFood ? 'checked' : ''}><span></span></label></div>
     <div class="gitem"><span>Compter les protéines</span><label class="switch"><input type="checkbox" data-b="showProt" ${s.showProt ? 'checked' : ''}><span></span></label></div>
     <div class="gitem"><span>Afficher les calories</span><label class="switch"><input type="checkbox" data-b="showKcal" ${s.showKcal ? 'checked' : ''}><span></span></label></div>
   </div>
@@ -1001,6 +1104,8 @@ function bindSettings() {
   $('#exp').onclick = () => { const data = { app: 'seche', version: 1, exported: new Date().toISOString(), settings: S.settings, days: S.days, weekly: S.weekly, photos: S.photos.map(p => ({ date: p.date, path: p.path, note: p.note })) }; const b = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }); const a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = `seche-${today()}.json`; a.click(); toast('Export prêt ✓'); };
   $('#imp').onclick = () => $('#importInput').click();
   $('#goGuide').onclick = () => go('guide');
+  $$('[data-delm]').forEach(b => b.onclick = () => { s.meals.splice(+b.dataset.delm, 1); saveSettings(); renderSettings(); });
+  [['me', 'e', String], ['mn', 'n', String], ['mk', 'kcal', v => Math.round(num(v) || 0)], ['mp', 'p', v => Math.round(num(v) || 0)]].forEach(([a, k, fn]) => $$(`[data-${a}]`).forEach(i => i.onchange = () => { s.meals[+i.dataset[a]][k] = fn(i.value.trim()); saveSettings(); }));
   $('#logout').onclick = async () => { if (confirm('Se déconnecter ?')) { await sb.auth.signOut(); location.reload(); } };
 }
 $('#importInput').onchange = async e => {
